@@ -1,0 +1,65 @@
+.\" Copyright 2008 Roy Marples
+.\" All rights reserved
+.\"
+.\" Redistribution and use in source and binary forms, with or without
+.\" modification, are permitted provided that the following conditions
+.\" are met:
+.\" 1. Redistributions of source code must retain the above copyright
+.\"    notice, this list of conditions and the following disclaimer.
+.\" 2. Redistributions in binary form must reproduce the above copyright
+.\"    notice, this list of conditions and the following disclaimer in the
+.\"    documentation and/or other materials provided with the distribution.
+.\"
+.\" THIS SOFTWARE IS PROVIDED BY THE AUTHOR AND CONTRIBUTORS ``AS IS'' AND
+.\" ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
+.\" IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE
+.\" ARE DISCLAIMED.  IN NO EVENT SHALL THE AUTHOR OR CONTRIBUTORS BE LIABLE
+.\" FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL
+.\" DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS
+.\" OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION)
+.\" HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
+.\" LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY
+.\" OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
+.\" SUCH DAMAGE.
+.\"
+.Dd October 07, 2008
+.Dt PARPD.CONF 5 SMM
+.Sh NAME
+.Nm parpd.conf
+.Nd Proxy ARP Daemon configuration file
+.Sh DESCRIPTION
+The
+.Nm
+file maps a range of inet addresses to be replied to by
+.Xr parpd 8 .
+Lines consist of a command, an inet address and an option Ethernet address
+to respond with.
+A
+.Sq \&#
+character indicates the beginning of a comment;
+characters up to the end of the line are not interpreted by
+.Nm parpd .
+.Pp
+Each line in
+.Nm
+has the format:
+.Dl command inet-address[/cidr][/netmask] [ethernet-MAC-address]
+.Pp
+Valid commands are 
+.Sy proxy
+and
+.Sy ignore .
+Inet addresses are specified in the conventional dot
+.Pq Dq \&.
+notation with an optional
+.Sy cidr
+or
+.Sy netmask .
+Ethernet MAC addresses are expressed as six hexadecimal numbers separated
+by colons, e.g. "08:00:20:00:5a:bc".
+.Sh SEE ALSO
+.Xr parpd 8 
+.Sh AUTHORS
+Roy Marples <roy@marples.name>
+.Sh BUGS
+Please report them to http://roy.marples.name/projects/parpd

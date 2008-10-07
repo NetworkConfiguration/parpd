@@ -60,18 +60,23 @@ discover_interfaces(int argc, char * const *argv)
 
 	for (ifa = ifap; ifa; ifa = ifa->ifa_next) {
 		sdl = (struct sockaddr_dl *)ifa->ifa_addr;
-		if (sdl->sdl_family != AF_LINK || ifa->ifa_data == 0)
+		if (sdl->sdl_family != AF_LINK ||
+		    ifa->ifa_flags & IFF_LOOPBACK ||
+		    ifa->ifa_flags & IFF_POINTOPOINT ||
+		    ifa->ifa_flags & IFF_NOARP ||
+		    ifa->ifa_data == 0)
 			continue;
- 		if (sdl->sdl_type != IFT_ETHER || sdl->sdl_alen != 6) {
-			syslog(LOG_DEBUG, "%s: ", ifa->ifa_name);
-			continue;
-		}
-		if (argc > 0 ) {
+		if (argc > 0) {
 			for (i = 0; i < argc; i++)
 				if (strcmp(ifa->ifa_name, argv[i]) == 0)
 					break;
 			if (i == argc)
 				continue;
+		}
+ 		if (sdl->sdl_type != IFT_ETHER || sdl->sdl_alen != 6) {
+			syslog(argc ? LOG_ERR : LOG_DEBUG,
+			       "%s: unsupported media family", ifa->ifa_name);
+			continue;
 		}
 		iface = xmalloc(sizeof(*iface));
 		strlcpy(iface->name, ifa->ifa_name, sizeof(iface->name));
@@ -80,8 +85,7 @@ discover_interfaces(int argc, char * const *argv)
 		memcpy(iface->hwaddr, LLADDR(sdl), sdl->sdl_alen);
 		iface->fd = open_arp(iface);
 		if (iface->fd == -1) {
-			syslog(argc ? LOG_ERR : LOG_DEBUG,
-			       "%s: unsupported media family",iface->name);
+			syslog(LOG_ERR, "open_arp %s: %m", iface->name);
 			free(iface);
 		} else {
 			iface->next = ifl;

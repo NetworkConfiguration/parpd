@@ -34,8 +34,6 @@
 
 #define HWADDR_LEN 20
 
-#define UNCONST(a)		((void *)(unsigned long)(const void *)(a))
-
 struct interface
 {
 	char name[IF_NAMESIZE];

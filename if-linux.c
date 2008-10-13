@@ -44,12 +44,17 @@
 
 #include "parpd.h"
 
+/* Set of macros used to convert a numeric constant into a string constant */
+#define STR(s) XSTR(s)
+#define XSTR(s) #s
+
+#define IF_NAMESIZE_S STR(IF_NAMESIZE)
+
 struct interface *
 discover_interfaces(int argc, char * const *argv)
 {
 	FILE *f;
-	char *buffer = NULL, *p;
-	size_t len = 0, ln = 0, n;
+	size_t n;
 	int i, s;
 	struct interface *ifs = NULL, *iface;
 	struct ifreq ifr;
@@ -61,24 +66,17 @@ discover_interfaces(int argc, char * const *argv)
 	if (s == -1)
 		return NULL;
 
-	while (get_line(&buffer, &len, f)) {
-		if (++ln < 2)
-			continue;
-		p = buffer;
-		while (isspace((unsigned int)*p))
-			p++;
-		n = strcspn(p, ": \t");
-		p[n]= '\0';
+	fscanf(f, "%*[^\n] %*[^\n] ");
+	while (!feof(f)) {
+		memset(&ifr, 0, sizeof(ifr));
+		fscanf(f, "%" IF_NAMESIZE_S "[^:]:%*[^\n] ", ifr.ifr_name);
 		if (argc > 0) {
 			for (i = 0; i < argc; i++)
-				if (strcmp(argv[i], p) == 0)
+				if (strcmp(argv[i], ifr.ifr_name) == 0)
 					break;
 			if (i == argc)
 				continue;
 		}
-
-		memset(&ifr, 0, sizeof(ifr));
-		strlcpy(ifr.ifr_name, p, sizeof(ifr.ifr_name));
 		if (ioctl(s, SIOCGIFFLAGS, &ifr) == -1)
 			continue;
 		if (ifr.ifr_flags & IFF_LOOPBACK ||
@@ -94,7 +92,8 @@ discover_interfaces(int argc, char * const *argv)
 				break;
 			default:
 				syslog(argc ? LOG_ERR : LOG_DEBUG,
-				       "%s: unsupported media family", p);
+				       "%s: unsupported media family",
+				       ifr.ifr_name);
 				continue;
 		}
 		iface = malloc(sizeof(*iface));
@@ -102,13 +101,13 @@ discover_interfaces(int argc, char * const *argv)
 			syslog(LOG_ERR, "memory exhausted");
 			exit(EXIT_FAILURE);
 		}
-		strlcpy(iface->name, p, sizeof(iface->name));
+		strlcpy(iface->name, ifr.ifr_name, sizeof(iface->name));
 		iface->hwlen = n;
 		memcpy(iface->hwaddr, ifr.ifr_hwaddr.sa_data, iface->hwlen);
 		iface->family = ifr.ifr_hwaddr.sa_family;
 		iface->fd = open_arp(iface);
 		if (iface->fd == -1) {
-			syslog(LOG_ERR, "open_arp %s: %m", p);
+			syslog(LOG_ERR, "open_arp %s: %m", ifr.ifr_name);
 			free(iface);
 		} else {
 			iface->next = ifs;
@@ -116,7 +115,6 @@ discover_interfaces(int argc, char * const *argv)
 		}
 	}
 	fclose(f);
-	free(buffer);
 
 	return ifs;
 }

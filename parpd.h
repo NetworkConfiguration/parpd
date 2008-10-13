@@ -53,4 +53,14 @@ ssize_t send_raw_packet(const struct interface *,
 			const uint8_t *, size_t, const void *, ssize_t);
 ssize_t get_raw_packet(struct interface *, void *, ssize_t);
 
+#define UNCONST(a)		((void *)(unsigned long)(const void *)(a))
+
+/* Only GLIBC doesn't support strlcpy */
+#ifdef __GLIBC__
+#  if !defined(__UCLIBC__) && !defined (__dietlibc__)
+#   include <stdio.h>
+#   define strlcpy(dst, src, len) snprintf(dst, len, "%s", src)
+#  endif
+#endif
+
 #endif

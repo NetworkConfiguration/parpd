@@ -47,7 +47,6 @@ const char copyright[] = "Copyright (c) 2008 Roy Marples";
 #include <syslog.h>
 #include <unistd.h>
 
-#include "common.h"
 #include "parpd.h"
 
 static struct interface *ifaces;
@@ -72,6 +71,36 @@ usage(void)
 {
 	printf("usage: parpd [-dfl] [-c file] [interface [...]]\n");
 }
+
+/* Handy routine to read very long lines in text files.
+ * This means we read the whole line and avoid any nasty buffer overflows. */
+static ssize_t
+get_line(char **line, size_t *len, FILE *fp)
+{
+	char *p;
+	size_t last = 0;
+
+	while(!feof(fp)) {
+		if (*line == NULL || last != 0) {
+			*len += BUFSIZ;
+			*line = realloc(*line, *len);
+			if (!*line) {
+				syslog(LOG_ERR, "memory exhausted");
+				exit(EXIT_FAILURE);
+			}
+		}
+		p = *line + last;
+		memset(p, 0, BUFSIZ);
+		fgets(p, BUFSIZ, fp);
+		last += strlen(p);
+		if (last && (*line)[last - 1] == '\n') {
+			(*line)[last - 1] = '\0';
+			break;
+		}
+	}
+	return last;
+}
+
 
 static size_t
 hwaddr_aton(unsigned char *buffer, const char *addr)
@@ -141,6 +170,7 @@ free_pents(void)
 	}
 	pents = NULL;
 }
+
 static int
 proxy(in_addr_t ip, uint8_t **hw, size_t *hwlen)
 {
@@ -236,7 +266,11 @@ proxy(in_addr_t ip, uint8_t **hw, size_t *hwlen)
 				}
 			}
 			/* OK, good to add now. */
-			pp = xmalloc(sizeof(*pp));
+			pp = malloc(sizeof(*pp));
+			if (!pp) {
+				syslog(LOG_ERR, "memory exhausted");
+				exit(EXIT_FAILURE);
+			}
 			pp->action = act;
 			pp->ip = ina.s_addr;
 			pp->net = net;
@@ -369,7 +403,6 @@ main(int argc, char **argv)
 	int nfds = 0, i;
 	struct pollfd *fds;
 
-	closefrom(3);
 	openlog("parpd", LOG_PERROR, LOG_DAEMON);
 	setlogmask(LOG_UPTO(LOG_NOTICE));
 
@@ -427,7 +460,11 @@ main(int argc, char **argv)
 	nfds = 0;
 	for (iface = ifaces; iface; iface = iface->next)
 		nfds++;
-	fds = xmalloc(sizeof(*fds) * nfds);
+	fds = malloc(sizeof(*fds) * nfds);
+	if (!fds) {
+		syslog(LOG_ERR, "memory exhausted");
+		exit(EXIT_FAILURE);
+	}
 	i = 0;
 	for (iface = ifaces; iface; iface = iface->next) {
 		syslog(LOG_DEBUG, "proxying on %s", iface->name);

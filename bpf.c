@@ -45,7 +45,6 @@
 #include <syslog.h>
 #include <unistd.h>
 
-#include "common.h"
 #include "parpd.h"
 #include "bpf-filter.h"
 
@@ -63,15 +62,13 @@ open_arp(struct interface *iface)
 #ifdef _PATH_BPF
 	fd = open(_PATH_BPF, O_RDWR | O_NONBLOCK);
 #else
-	char *device;
+	char device[PATH_MAX];
 	int n = 0;
 
-	device = xmalloc(sizeof(char) * PATH_MAX);
 	do {
-		snprintf(device, PATH_MAX, "/dev/bpf%d", n++);
+		snprintf(device, sizeof(device), "/dev/bpf%d", n++);
 		fd = open(device, O_RDWR | O_NONBLOCK);
 	} while (fd == -1 && errno == EBUSY);
-	free(device);
 #endif
 
 	if (fd == -1)
@@ -96,7 +93,11 @@ open_arp(struct interface *iface)
 	if (iface->buffer_size != (size_t)buf_len) {
 		free(iface->buffer);
 		iface->buffer_size = buf_len;
-		iface->buffer = xmalloc(buf_len);
+		iface->buffer = malloc(buf_len);
+		if (!iface->buffer) {
+			syslog(LOG_ERR, "memory exhausted");
+			exit(EXIT_FAILURE);
+		}
 		iface->buffer_len = iface->buffer_pos = 0;
 	}
 

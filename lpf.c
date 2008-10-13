@@ -52,7 +52,6 @@
 #include <string.h>
 #include <unistd.h>
 
-#include "common.h"
 #include "bpf-filter.h"
 #include "parpd.h"
 

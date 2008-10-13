@@ -3,8 +3,7 @@
 # Copyright 2008 Roy Marples <roy@marples.name>
 
 PROG=		parpd
-SRCS=		common.c parpd.c
-SRCS+=		${SRC_IF} ${SRC_PF}
+SRCS=		parpd.c ${SRC_IF} ${SRC_PF}
 
 BINDIR=		${PREFIX}/sbin
 

@@ -42,7 +42,6 @@
 #include <syslog.h>
 #include <unistd.h>
 
-#include "common.h"
 #include "parpd.h"
 
 struct interface *
@@ -98,7 +97,11 @@ discover_interfaces(int argc, char * const *argv)
 				       "%s: unsupported media family", p);
 				continue;
 		}
-		iface = xmalloc(sizeof(*iface));
+		iface = malloc(sizeof(*iface));
+		if (!iface) {
+			syslog(LOG_ERR, "memory exhausted");
+			exit(EXIT_FAILURE);
+		}
 		strlcpy(iface->name, p, sizeof(iface->name));
 		iface->hwlen = n;
 		memcpy(iface->hwaddr, ifr.ifr_hwaddr.sa_data, iface->hwlen);

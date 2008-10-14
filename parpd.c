@@ -309,17 +309,21 @@ load_config(void)
 			syslog(LOG_DEBUG, "%s: invalid inet addr", match);
 			continue;
 		}
-		if (hwaddr && *hwaddr != '#' && *hwaddr != ';') {
-			len = hwaddr_aton(NULL, hwaddr);
-			if (!len) {
-				syslog(LOG_DEBUG,
-				       "%s: invalid hw addr", hwaddr);
-				continue;
-			}
-			if (len > HWADDR_LEN) {
-				syslog(LOG_DEBUG,
-				       "%s: hw addr too long", hwaddr);
-				continue;
+		if (hwaddr) {
+			if (*hwaddr == '#' || *hwaddr == ';') {
+				hwaddr = NULL;
+			} else {
+				len = hwaddr_aton(NULL, hwaddr);
+				if (len == 0) {
+					syslog(LOG_DEBUG,
+					       "%s: invalid hw addr", hwaddr);
+					continue;
+				}
+				if (len > HWADDR_LEN) {
+					syslog(LOG_DEBUG,
+					       "%s: hw addr too long", hwaddr);
+					continue;
+				}
 			}
 		}
 		/* OK, good to add now. */

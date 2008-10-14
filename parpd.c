@@ -544,7 +544,6 @@ main(int argc, char **argv)
 				ifl->next = iface->next;
 			else
 				ifaces = iface->next;
-			free_pents(iface->pents);
 			free(iface);
 		}
 		if (!ifaces) {

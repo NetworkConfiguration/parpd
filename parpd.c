@@ -62,8 +62,6 @@ static struct pent {
 	struct pent *next;
 } *pents;
 
-static char *buf;
-static size_t buflen;
 static char hwaddr_buffer[(HWADDR_LEN * 3) + 1];
 
 static void
@@ -71,36 +69,6 @@ usage(void)
 {
 	printf("usage: parpd [-dfl] [-c file] [interface [...]]\n");
 }
-
-/* Handy routine to read very long lines in text files.
- * This means we read the whole line and avoid any nasty buffer overflows. */
-static ssize_t
-get_line(char **line, size_t *len, FILE *fp)
-{
-	char *p;
-	size_t last = 0;
-
-	while(!feof(fp)) {
-		if (*line == NULL || last != 0) {
-			*len += BUFSIZ;
-			*line = realloc(*line, *len);
-			if (!*line) {
-				syslog(LOG_ERR, "memory exhausted");
-				exit(EXIT_FAILURE);
-			}
-		}
-		p = *line + last;
-		memset(p, 0, BUFSIZ);
-		fgets(p, BUFSIZ, fp);
-		last += strlen(p);
-		if (last && (*line)[last - 1] == '\n') {
-			(*line)[last - 1] = '\0';
-			break;
-		}
-	}
-	return last;
-}
-
 
 static size_t
 hwaddr_aton(unsigned char *buffer, const char *addr)
@@ -171,13 +139,35 @@ free_pents(void)
 	pents = NULL;
 }
 
+
+static char *
+get_word(char **s, const char *e)
+{
+	char *p, *w = NULL;
+
+	if (!s)
+		return NULL;
+	p = *s;
+	while (p < e && (*p == ' ' || *p == '\t' || *p == '\n'))
+		p++;
+	if (p < e) {
+		w = p++;
+		while (p < e && *p != ' ' && *p != '\t' && *p != '\n')
+			p++;
+		if (*p == ' ' || *p == '\t' || *p == '\n')
+			*p++ = '\0';
+	}
+	*s = p;
+	return w;
+}
+
 static int
 proxy(in_addr_t ip, uint8_t **hw, size_t *hwlen)
 {
 	struct stat st;
 	FILE *f;
-	char *cmd, *match, *hwaddr, *p, *r;
-	size_t len;
+	char *buf, *cmd, *match, *hwaddr, *p, *e, *r;
+	size_t buf_len, len;
 	struct pent *pp;
 	int act, cidr;
 	struct in_addr ina;
@@ -193,34 +183,26 @@ proxy(in_addr_t ip, uint8_t **hw, size_t *hwlen)
 		if (f == NULL)
 			return -1;
 		config_mtime = st.st_mtime;
-		while ((get_line(&buf, &buflen, f))) {
-			if (*buf == '\0' || *buf == ';' || *buf == '#')
+		while ((buf = fgetln(f, &buf_len))) {
+			e = buf + buf_len;
+			cmd = get_word(&buf, e);
+			if (!cmd || *cmd == '\n' || *cmd == '#' || *cmd == ';')
 				continue;
-			p = buf;
-			cmd = match = hwaddr = NULL;
-			act = -1;
-			net = ~0;
-			while ((cmd = strsep(&p, " \t")))
-				if (*cmd)
-					break;
 			if (strcmp(cmd, "proxy") == 0)
 				act = 1;
 			else if (strcmp(cmd, "ignore") == 0)
 				act = 0;
 			else {
-				syslog(LOG_DEBUG, "%s: invalid command", cmd);
+				syslog(LOG_ERR, "%s: unknown command", cmd);
 				continue;
 			}
-			while ((match = strsep(&p, " \t")))
-				if (*match)
-					break;
+			match = get_word(&buf, e);
+			hwaddr = get_word(&buf, e);
 			if (!match) {
 				syslog(LOG_DEBUG, "no ip/cidr given");
 				continue;
 			}
-			while ((hwaddr = strsep(&p, " \t")))
-				if (*hwaddr)
-					break;
+			net = ~0;
 			p = strchr(match, '/');
 			if (p) {
 				*p++ = '\0';
@@ -252,7 +234,7 @@ proxy(in_addr_t ip, uint8_t **hw, size_t *hwlen)
 				       match);
 				continue;
 			}
-			if (hwaddr) {
+			if (hwaddr && *hwaddr != '#' && *hwaddr != ';') {
 				len = hwaddr_aton(NULL, hwaddr);
 				if (!len) {
 					syslog(LOG_DEBUG,

@@ -53,15 +53,7 @@ const char copyright[] = "Copyright (c) 2008 Roy Marples";
 static struct interface *ifaces;
 static const char *cffile = "/etc/parpd.conf";
 static time_t config_mtime;
-
-static struct pent {
-	char action;
-	in_addr_t ip;
-	in_addr_t net;
-	uint8_t hwaddr[HWADDR_LEN];
-	size_t hwlen;
-	struct pent *next;
-} *pents;
+static struct pent *pents;
 
 static char hwaddr_buffer[(HWADDR_LEN * 3) + 1];
 
@@ -187,11 +179,10 @@ hwaddr_ntoa(const unsigned char *hwaddr, size_t hwlen)
 }
 
 static void
-free_pents(void)
+free_pents(struct pent *pp)
 {
-	struct pent *pp, *pn;
+	struct pent *pn;
 
-	pp = pents;
 	while (pp) {
 		pn = pp->next;
 		free(pp);
@@ -228,127 +219,155 @@ get_word(char **s, const char *e)
 	return w;
 }
 
-/* Return 1 if we have an entry for the IP and optionally an alternative
- * hardware address to reply with.
- * If the config file has been modified since we last loaded it, we re-load
- * it. */
 static int
-proxy(in_addr_t ip, uint8_t **hw, size_t *hwlen)
+load_config(void)
 {
 	struct stat st;
 	FILE *f;
 	char *buf, *cmd, *match, *hwaddr, *p, *e, *r;
 	size_t buf_len, len;
 	struct pent *pp;
-	int act, cidr;
+	int act, cidr, in_interface;
 	struct in_addr ina;
 	in_addr_t net;
+	struct interface *iface;
 
 	if (stat(cffile, &st) == -1) {
-		free_pents();
+		free_pents(pents);
+		for (iface = ifaces; iface; iface = iface->next)
+			free_pents(iface->pents);
 		return -1;
 	}
-	if (config_mtime != st.st_mtime) {
-		free_pents();
-		f = fopen(cffile, "r");
-		if (f == NULL)
-			return -1;
-		config_mtime = st.st_mtime;
-		while ((buf = fgetln(f, &buf_len))) {
-			e = buf + buf_len;
-			cmd = get_word(&buf, e);
-			if (!cmd || *cmd == '\n' || *cmd == '#' || *cmd == ';')
-				continue;
-			if (strcmp(cmd, "proxy") == 0)
-				act = 1;
-			else if (strcmp(cmd, "ignore") == 0)
-				act = 0;
-			else {
-				syslog(LOG_ERR, "%s: unknown command", cmd);
-				continue;
-			}
-			match = get_word(&buf, e);
-			hwaddr = get_word(&buf, e);
-			if (!match) {
-				syslog(LOG_DEBUG, "no ip/cidr given");
-				continue;
-			}
-			net = ~0;
-			p = strchr(match, '/');
-			if (p) {
-				*p++ = '\0';
-				if (*p) {
-					errno = 0;
-					cidr = strtol(p, &r, 10);
-					if (errno == 0 && !*r) {
-						if (cidr < 0 || cidr > 32) {
-							syslog(LOG_DEBUG,
-							       "%s: invalid "
-							       "cidr", p);
-							continue;
-						}
-						net <<= (32 - cidr);
-						net = htonl(net);
-					} else {
-						if (inet_aton(p, &ina) == 0) {
-							syslog(LOG_DEBUG,
-							       "%s: invalid "
-						               "netmask", p);
-							continue;
-						}
-						net = ina.s_addr;
+	if (config_mtime == st.st_mtime)
+		return 0;
+
+	free_pents(pents);
+	for (iface = ifaces; iface; iface = iface->next)
+		free_pents(iface->pents);
+	f = fopen(cffile, "r");
+	if (f == NULL)
+		return -1;
+	config_mtime = st.st_mtime;
+	iface = NULL;
+	in_interface = 0;
+	while ((buf = fgetln(f, &buf_len))) {
+		e = buf + buf_len;
+		cmd = get_word(&buf, e);
+		if (!cmd || *cmd == '\n' || *cmd == '#' || *cmd == ';')
+			continue;
+		match = get_word(&buf, e);
+		if (strcmp(cmd, "proxy") == 0)
+			act = 1;
+		else if (strcmp(cmd, "ignore") == 0)
+			act = 0;
+		else if (strcmp(cmd, "interface") == 0) {
+			in_interface = 1;
+			for (iface = ifaces; iface; iface = iface->next)
+				if (strcmp(iface->name, match) == 0)
+					break;
+			if (!iface)
+				syslog(LOG_ERR,
+				       "%s: unknown interface", match);
+			continue;
+		} else {
+			syslog(LOG_ERR, "%s: unknown command", cmd);
+			continue;
+		}
+		if (in_interface && !iface)
+			continue;
+		hwaddr = get_word(&buf, e);
+		if (!match) {
+			syslog(LOG_DEBUG, "no ip/cidr given");
+			continue;
+		}
+		net = ~0;
+		p = strchr(match, '/');
+		if (p) {
+			*p++ = '\0';
+			if (*p) {
+				errno = 0;
+				cidr = strtol(p, &r, 10);
+				if (errno == 0 && !*r) {
+					if (cidr < 0 || cidr > 32) {
+						syslog(LOG_DEBUG,
+						       "%s: invalid cidr", p);
+						continue;
 					}
+					net <<= (32 - cidr);
+					net = htonl(net);
+				} else {
+					if (inet_aton(p, &ina) == 0) {
+						syslog(LOG_DEBUG,
+						       "%s: invalid mask", p);
+						continue;
+					}
+					net = ina.s_addr;
 				}
 			}
-			if (inet_aton(match, &ina) == 0) {
-				syslog(LOG_DEBUG, "%s: invalid inet addr",
-				       match);
+		}
+		if (inet_aton(match, &ina) == 0) {
+			syslog(LOG_DEBUG, "%s: invalid inet addr", match);
+			continue;
+		}
+		if (hwaddr && *hwaddr != '#' && *hwaddr != ';') {
+			len = hwaddr_aton(NULL, hwaddr);
+			if (!len) {
+				syslog(LOG_DEBUG,
+				       "%s: invalid hw addr", hwaddr);
 				continue;
 			}
-			if (hwaddr && *hwaddr != '#' && *hwaddr != ';') {
-				len = hwaddr_aton(NULL, hwaddr);
-				if (!len) {
-					syslog(LOG_DEBUG,
-					       "%s: invalid hw addr", hwaddr);
-					continue;
-				}
-				if (len > HWADDR_LEN) {
-					syslog(LOG_DEBUG,
-					       "%s: hw addr too long", hwaddr);
-					continue;
-				}
+			if (len > HWADDR_LEN) {
+				syslog(LOG_DEBUG,
+				       "%s: hw addr too long", hwaddr);
+				continue;
 			}
-			/* OK, good to add now. */
-			pp = malloc(sizeof(*pp));
-			if (!pp) {
-				syslog(LOG_ERR, "memory exhausted");
-				exit(EXIT_FAILURE);
-			}
-			pp->action = act;
-			pp->ip = ina.s_addr;
-			pp->net = net;
-			if (hwaddr)
-				pp->hwlen = hwaddr_aton(pp->hwaddr, hwaddr);
-			else
-				pp->hwlen = 0;
+		}
+		/* OK, good to add now. */
+		pp = malloc(sizeof(*pp));
+		if (!pp) {
+			syslog(LOG_ERR, "memory exhausted");
+			exit(EXIT_FAILURE);
+		}
+		pp->action = act;
+		pp->ip = ina.s_addr;
+		pp->net = net;
+		if (hwaddr)
+			pp->hwlen = hwaddr_aton(pp->hwaddr, hwaddr);
+		else
+			pp->hwlen = 0;
+		if (iface) {
+			pp->next = iface->pents;
+			iface->pents = pp;
+		} else {
 			pp->next = pents;
 			pents = pp;
 		}
-		fclose(f);
 	}
+	fclose(f);
+	return 0;
+}
 
-	for (pp = pents; pp; pp = pp->next) {
+static int
+proxy(const struct pent *ps, in_addr_t ip, const uint8_t **hw, size_t *hwlen)
+{
+	const struct pent *pp;
+
+	if (load_config() == -1)
+		return -1;
+
+	for (pp = ps; pp; pp = pp->next) {
 		if (pp->ip == ip ||
 		    pp->ip == INADDR_ANY ||
 		    pp->ip == (ip & pp->net)) {
-			if (hw)
-				*hw = pp->hwaddr;
-			if (hwlen)
-				*hwlen = pp->hwlen;
+			if (pp->action == 1) {
+				if (hw)
+					*hw = pp->hwaddr;
+				if (hwlen)
+					*hwlen = pp->hwlen;
+			}
 			return pp->action;
 		}
 	}
-
 	return 0;
 }
 
@@ -357,7 +376,7 @@ proxy(in_addr_t ip, uint8_t **hw, size_t *hwlen)
 /* Does what is says on the tin - sends an ARP message */
 static int
 send_arp(const struct interface *iface, int op, size_t hlen,
-	 uint8_t *sha, in_addr_t sip, uint8_t *tha, in_addr_t tip)
+	 const uint8_t *sha, in_addr_t sip, const uint8_t *tha, in_addr_t tip)
 {
 	uint8_t arp_buffer[ARP_LEN];
 	struct arphdr ar;
@@ -389,7 +408,8 @@ send_arp(const struct interface *iface, int op, size_t hlen,
 static void
 handle_arp(struct interface *iface)
 {
-	uint8_t arp_buffer[ARP_LEN], *shw, *thw, *phw;
+	uint8_t arp_buffer[ARP_LEN], *shw, *thw;
+	const uint8_t *phw;
 	struct arphdr ar;
 	in_addr_t sip, tip;
 	size_t hwlen;
@@ -430,7 +450,8 @@ handle_arp(struct interface *iface)
 		ina.s_addr = tip;
 		syslog(LOG_DEBUG, "%s: received ARPOP_REQUEST for %s",
 		       iface->name, inet_ntoa(ina));
-		if (proxy(tip, &phw, &hwlen) != 1)
+		if (proxy(iface->pents, tip, &phw, &hwlen) != 1 &&
+		    proxy(pents, tip, &phw, &hwlen) != 1)
 			continue;
 		if (!hwlen) {
 			phw = iface->hwaddr;
@@ -452,7 +473,7 @@ handle_arp(struct interface *iface)
 int
 main(int argc, char **argv)
 {
-	struct interface *iface;
+	struct interface *iface, *ifl, *ifn;
 	int opt, fflag = 0;
 	int nfds = 0, i;
 	struct pollfd *fds;
@@ -483,15 +504,6 @@ main(int argc, char **argv)
 	argc -= optind;
 	argv += optind;
 
-	if (proxy(0, NULL, NULL) == -1) {
-		syslog(LOG_ERR, "%s: %m", cffile);
-		exit(EXIT_FAILURE);
-	}
-	if (!pents) {
-		syslog(LOG_ERR, "%s: no valid entries", cffile);
-		exit(EXIT_FAILURE);
-	}
-
 	ifaces = discover_interfaces(argc, argv);
 	for (i = 0; i < argc; i++) {
 		for (iface = ifaces; iface; iface = iface->next)
@@ -506,6 +518,35 @@ main(int argc, char **argv)
 	if (!ifaces) {
 		syslog(LOG_ERR, "no suitable interfaces found");
 		exit(EXIT_FAILURE);
+	}
+
+	if (load_config() == -1) {
+		syslog(LOG_ERR, "%s: %m", cffile);
+		exit(EXIT_FAILURE);
+	}
+	if (!pents) {
+		/* No global entries, so remove interfaces without any
+		 * either as they'll do nothing. */
+		ifl = NULL;
+		for (iface = ifaces;
+		     iface && (ifn = iface->next, 1);
+		     iface = ifn)
+		{
+			if (iface->pents) {
+				ifl = iface;
+				continue;
+			}
+			if (ifl)
+				ifl->next = iface->next;
+			else
+				ifaces = iface->next;
+			free_pents(iface->pents);
+			free(iface);
+		}
+		if (!ifaces) {
+			syslog(LOG_ERR, "%s: no valid entries", cffile);
+			exit(EXIT_FAILURE);
+		}
 	}
 
 	if (!fflag)

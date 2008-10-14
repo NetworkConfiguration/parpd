@@ -91,6 +91,7 @@ discover_interfaces(int argc, char * const *argv)
 			syslog(LOG_ERR, "open_arp %s: %m", iface->name);
 			free(iface);
 		} else {
+			iface->pents = NULL;
 			iface->next = ifl;
 			ifl = iface;
 		}

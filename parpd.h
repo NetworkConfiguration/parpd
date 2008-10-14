@@ -34,6 +34,15 @@
 
 #define HWADDR_LEN 20
 
+struct pent {
+	char action;
+	in_addr_t ip;
+	in_addr_t net;
+	uint8_t hwaddr[HWADDR_LEN];
+	size_t hwlen;
+	struct pent *next;
+};
+
 struct interface
 {
 	char name[IF_NAMESIZE];
@@ -43,6 +52,7 @@ struct interface
 	int fd;
 	size_t buffer_size, buffer_len, buffer_pos;
 	unsigned char *buffer;
+	struct pent *pents;
 	struct interface *next;
 };
 

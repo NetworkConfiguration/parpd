@@ -22,7 +22,7 @@
 .\" OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
 .\" SUCH DAMAGE.
 .\"
-.Dd October 07, 2008
+.Dd October 14, 2008
 .Dt PARPD.CONF 5 SMM
 .Sh NAME
 .Nm parpd.conf
@@ -43,19 +43,24 @@ characters up to the end of the line are not interpreted by
 Each line in
 .Nm
 has the format:
-.Dl command inet-address[/cidr][/netmask] [ethernet-MAC-address]
+.Dl command [inet-address[/cidr][/netmask]][iface] [hardware-address]
 .Pp
 Valid commands are 
-.Sy proxy
+.Sy proxy ,
+.Sy ignore
 and
-.Sy ignore .
+.Sy interface .
 Inet addresses are specified in the conventional dot
 .Pq Dq \&.
 notation with an optional
 .Sy cidr
 or
 .Sy netmask .
-Ethernet MAC addresses are expressed as six hexadecimal numbers separated
+Using the
+.Sy interface
+command, you can specify an interface on which all subsequent commands
+are only used on.
+Hardware addresses are expressed as six hexadecimal numbers separated
 by colons, e.g. "08:00:20:00:5a:bc".
 .Sh SEE ALSO
 .Xr parpd 8 

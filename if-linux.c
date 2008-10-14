@@ -110,6 +110,7 @@ discover_interfaces(int argc, char * const *argv)
 			syslog(LOG_ERR, "open_arp %s: %m", ifr.ifr_name);
 			free(iface);
 		} else {
+			iface->pents = NULL;
 			iface->next = ifs;
 			ifs = iface;
 		}

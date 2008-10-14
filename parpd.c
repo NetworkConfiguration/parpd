@@ -27,6 +27,7 @@
 
 const char copyright[] = "Copyright (c) 2008 Roy Marples";
 
+#include <sys/param.h>
 #include <sys/socket.h>
 #include <sys/stat.h>
 #include <sys/types.h>
@@ -69,6 +70,64 @@ usage(void)
 {
 	printf("usage: parpd [-dfl] [-c file] [interface [...]]\n");
 }
+
+#ifndef BSD
+/* fgetln is a BSD specific function.
+ * This implementation only supports one buffer instead of one per stream. */
+static char *
+fgetln(FILE *stream, size_t *len)
+{
+	static char *fbuf;
+	static size_t fbuf_len;
+
+#if defined(__GLIBC__) && defined(_GNU_SOURCE)
+	/* glibc has the getline function which is almost equivalent.
+	 * Some libc's claim to emulate glibc, but lack glibc extensions
+	 * like getline, so to get this you'll have to add _GNU_SOURCE to
+	 * your CPPFLAGS. */
+	if (getline(&fbuf, &fbuf_len, stream) == -1) {
+		*len = 0;
+		return NULL;
+	}
+	*len = strlen(fbuf);
+	return fbuf;
+#else
+	size_t pos, nlen;
+	int c;
+	char *nbuf;
+
+	if (!fbuf) {
+		fbuf_len = BUFSIZ;
+		fbuf = malloc(fbuf_len);
+		if (!fbuf) {
+			*len = 0;
+			return NULL;
+		}
+	}
+
+	pos = 0;
+	while ((c = fgetc(stream)) != EOF) {
+		if (pos > fbuf_len) {
+			nlen = fbuf_len + BUFSIZ;
+			nbuf = realloc(fbuf, nlen);
+			if (!nbuf) {
+				free(fbuf);
+				fbuf = NULL;
+				*len = 0;
+				return NULL;
+			}
+			fbuf = nbuf;
+			fbuf_len = nlen;
+		}
+		fbuf[pos++] = c;
+		if (c == '\n')
+			break;
+	}
+	*len = pos;
+	return pos == 0 ? NULL : fbuf;
+#endif
+}
+#endif
 
 static size_t
 hwaddr_aton(unsigned char *buffer, const char *addr)

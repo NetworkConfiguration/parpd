@@ -198,7 +198,11 @@ free_pents(void)
 	pents = NULL;
 }
 
-
+/* Because fgetln does not return C strings, we cannot use
+ * functions such as strsep and friends to extract words.
+ * This is no bad thing this below code handles extracting words
+ * from a string boundary and should result in smaller code
+ * compared to using true C strings and strsep style functions. */
 static char *
 get_word(char **s, const char *e)
 {
@@ -211,10 +215,12 @@ get_word(char **s, const char *e)
 		p++;
 	if (p < e) {
 		w = p++;
-		while (p < e && *p != ' ' && *p != '\t' && *p != '\n')
-			p++;
-		if (*p == ' ' || *p == '\t' || *p == '\n')
-			*p++ = '\0';
+		for (; p < e; p++) {
+			if (*p == ' ' || *p == '\t' || *p == '\n') {
+				*p++ = '\0';
+				break;
+			}
+		}
 	}
 	*s = p;
 	return w;

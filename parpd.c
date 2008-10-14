@@ -129,6 +129,7 @@ fgetln(FILE *stream, size_t *len)
 }
 #endif
 
+/* Like ether_aton, but works with longer addresses */
 static size_t
 hwaddr_aton(unsigned char *buffer, const char *addr)
 {
@@ -167,6 +168,7 @@ hwaddr_aton(unsigned char *buffer, const char *addr)
 	return len;
 }
 
+/* Like ether_aton, but works with longer addresses */
 static char *
 hwaddr_ntoa(const unsigned char *hwaddr, size_t hwlen)
 {
@@ -226,6 +228,10 @@ get_word(char **s, const char *e)
 	return w;
 }
 
+/* Return 1 if we have an entry for the IP and optionally an alternative
+ * hardware address to reply with.
+ * If the config file has been modified since we last loaded it, we re-load
+ * it. */
 static int
 proxy(in_addr_t ip, uint8_t **hw, size_t *hwlen)
 {
@@ -348,7 +354,7 @@ proxy(in_addr_t ip, uint8_t **hw, size_t *hwlen)
 
 #define ARP_LEN \
 	(sizeof(struct arphdr) + (2 * sizeof(uint32_t)) + (2 * HWADDR_LEN))
-
+/* Does what is says on the tin - sends an ARP message */
 static int
 send_arp(const struct interface *iface, int op, size_t hlen,
 	 uint8_t *sha, in_addr_t sip, uint8_t *tha, in_addr_t tip)
@@ -379,6 +385,7 @@ send_arp(const struct interface *iface, int op, size_t hlen,
 	return retval;
 }
 
+/* Checks an incoming ARP message to see if we should proxy for it. */
 static void
 handle_arp(struct interface *iface)
 {

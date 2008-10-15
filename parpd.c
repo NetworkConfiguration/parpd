@@ -36,6 +36,7 @@ const char copyright[] = "Copyright (c) 2008 Roy Marples";
 #include <net/if.h>
 #include <net/if_arp.h>
 #include <netinet/if_ether.h>
+#include <netinet/in.h>
 
 #include <ctype.h>
 #include <errno.h>

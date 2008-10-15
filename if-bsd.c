@@ -57,7 +57,7 @@ discover_interfaces(int argc, char * const *argv)
 	}
 
 	for (ifa = ifap; ifa; ifa = ifa->ifa_next) {
-		sdl = (struct sockaddr_dl *)ifa->ifa_addr;
+		sdl = (struct sockaddr_dl *)(void *)ifa->ifa_addr;
 		if (sdl->sdl_family != AF_LINK ||
 		    ifa->ifa_flags & IFF_LOOPBACK ||
 		    ifa->ifa_flags & IFF_POINTOPOINT ||

@@ -30,7 +30,7 @@
 
 #include <net/if.h>
 
-#define VERSION			"1.0"
+#define VERSION			"1.1"
 
 #define HWADDR_LEN 20
 

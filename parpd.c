@@ -334,7 +334,7 @@ load_config(void)
 			exit(EXIT_FAILURE);
 		}
 		pp->action = act;
-		pp->ip = ina.s_addr;
+		pp->ip = ina.s_addr & net;
 		pp->net = net;
 		if (hwaddr)
 			pp->hwlen = hwaddr_aton(pp->hwaddr, hwaddr);

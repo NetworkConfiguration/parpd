@@ -361,9 +361,8 @@ proxy(const struct pent *ps, in_addr_t ip, const uint8_t **hw, size_t *hwlen)
 		return -1;
 
 	for (pp = ps; pp; pp = pp->next) {
-		if (pp->ip == ip ||
-		    pp->ip == INADDR_ANY ||
-		    pp->ip == (ip & pp->net)) {
+		if (pp->ip == (ip & pp->net) ||
+		    pp->ip == INADDR_ANY) {
 			if (pp->action == 1) {
 				if (hw)
 					*hw = pp->hwaddr;

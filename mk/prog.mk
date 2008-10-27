@@ -18,15 +18,12 @@ ${PROG}: ${OBJS}
 _proginstall: ${PROG}
 	${INSTALL} -d ${DESTDIR}${BINDIR}
 	${INSTALL} -m ${BINMODE} ${PROG} ${DESTDIR}${BINDIR}
-	${INSTALL} -d ${DESTDIR}${DBDIR}
 
 include ${MK}/depend.mk
-include ${MK}/files.mk
 include ${MK}/man.mk
 include ${MK}/dist.mk
 
 install: _proginstall _maninstall
-	for x in ${SUBDIRS}; do cd $$x; ${MAKE} $@; cd ..; done
 
 clean:
 	rm -f ${OBJS} ${PROG} ${PROG}.core ${CLEANFILES}

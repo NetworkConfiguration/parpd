@@ -9,9 +9,6 @@ BINDIR=		${PREFIX}/sbin
 
 MAN=		parpd.conf.5 parpd.8
 
-FILES=		parpd.conf
-FILESDIR=	${SYSCONFDIR}
-
 MK=		mk
 include ${MK}/sys.mk
 include ${MK}/os.mk

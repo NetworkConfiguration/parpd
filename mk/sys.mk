@@ -1,15 +1,15 @@
 # Simple defaults
 
 PREFIX?=	/usr
-BINDIR?=	${PREFIX}/usr/bin
+BINDIR?=	${PREFIX}/bin
 BINMODE?=	0755
 NONBINMODE?=	0644
 
-SYSCONFDIR?=	${PREFIX}/etc
+_SYSCONFDIR_SH=	if test "${PREFIX}" = "/usr"; then \
+		echo ""; else echo "${PREFIX}"; fi
+__SYSCONFDIR!=	${_SYSCONFDIR_SH}
+_SYSCONFDIR=	${__SYSCONFDIR}$(shell ${_SYSCONFDIR_SH})
+SYSCONFDIR?=	${_SYSCONFDIR}/etc
 
 INSTALL?=	install
 SED?=		sed
-
-_LIBNAME_SH=		case `readlink /lib` in "") echo "lib";; *) basename `readlink /lib`;; esac
-_LIBNAME!=		${_LIBNAME_SH}
-LIBNAME?=		${_LIBNAME}$(shell ${_LIBNAME_SH})

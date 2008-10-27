@@ -22,7 +22,7 @@
 .\" OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
 .\" SUCH DAMAGE.
 .\"
-.Dd October 07, 2008
+.Dd October 27, 2008
 .Dt PARPD 8 SMM
 .Sh NAME
 .Nm parpd
@@ -52,12 +52,12 @@ forks a copy of itself and runs in the background.
 Errors are reported via
 .Xr syslog 3 .
 .Sh OPTIONS
-.Bl -tag -width Fl c Ar file
+.Bl -tag -width Fl
 .It Fl c Ar file
 Use this
 .Ar file
 for configuration instead of the default
-.Pa /etc/parpd.conf .
+.Pa @SYSCONFDIR@/parpd.conf .
 .It Fl d
 Run in debug mode, with all the output to stderr.
 This option implies the
@@ -70,7 +70,7 @@ Log all requests to syslog.
 .El
 .Sh FILES
 .Bl -tag -width Pa -compact
-.It Pa /etc/parpd.conf
+.It Pa @SYSCONFDIR@/parpd.conf
 .El
 .Sh SEE ALSO
 .Xr parpd.conf 5

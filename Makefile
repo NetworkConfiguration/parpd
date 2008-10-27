@@ -8,6 +8,12 @@ SRCS=		parpd.c ${SRC_IF} ${SRC_PF}
 BINDIR=		${PREFIX}/sbin
 
 MAN=		parpd.conf.5 parpd.8
+CLEANFILES=	parpd.8
+
+CPPFLAGS+=	-DSYSCONFDIR=\"${SYSCONFDIR}\"
+.SUFFIXES:	.in
+.in:
+	${SED} -e 's:@SYSCONFDIR@:${SYSCONFDIR}:g' $< >$@
 
 MK=		mk
 include ${MK}/sys.mk

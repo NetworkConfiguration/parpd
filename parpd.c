@@ -52,7 +52,7 @@ const char copyright[] = "Copyright (c) 2008 Roy Marples";
 #include "parpd.h"
 
 static struct interface *ifaces;
-static const char *cffile = "/etc/parpd.conf";
+static const char *cffile = PARPD_CONF;
 static time_t config_mtime;
 static struct pent *pents;
 

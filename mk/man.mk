@@ -16,7 +16,7 @@ _MAN8_SH=	for man in ${MAN}; do case $$man in *.8) echo $$man;; esac; done
 _MAN8!=		${_MAN8_SH}
 MAN8=		${_MAN8}$(shell ${_MAN8_SH})
 
-_man:
+_man: ${MAN}
 
 _maninstall: _man
 	${INSTALL} -d ${DESTDIR}${MANDIR}5

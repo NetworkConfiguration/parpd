@@ -30,7 +30,11 @@
 
 #include <net/if.h>
 
-#define VERSION			"1.1.1"
+#define VERSION			"1.2"
+#ifndef SYSCONFDIR
+# define SYSCONFDIR		"/etc"
+#endif
+#define PARPD_CONF		SYSCONFDIR "/parpd.conf"
 
 #define HWADDR_LEN 20
 

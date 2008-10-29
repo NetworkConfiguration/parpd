@@ -281,7 +281,7 @@ load_config(void)
 			syslog(LOG_DEBUG, "no ip/cidr given");
 			continue;
 		}
-		net = ~0;
+		net = ~0U;
 		p = strchr(match, '/');
 		if (p) {
 			*p++ = '\0';

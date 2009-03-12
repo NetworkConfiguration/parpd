@@ -24,6 +24,7 @@
 .\"
 .Dd October 27, 2008
 .Dt PARPD 8 SMM
+.Os
 .Sh NAME
 .Nm parpd
 .Nd a Proxy ARP Daemon

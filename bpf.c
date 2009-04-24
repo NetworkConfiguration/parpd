@@ -90,7 +90,7 @@ open_arp(struct interface *ifp)
 	/* Get the required BPF buffer length from the kernel. */
 	if (ioctl(fd, BIOCGBLEN, &buf_len) == -1)
 		goto eexit;
-	if (iface->buffer_size != (size_t)buf_len) {
+	if (ifp->buffer_size != (size_t)buf_len) {
 		free(ifp->buffer);
 		ifp->buffer_size = buf_len;
 		ifp->buffer = malloc(buf_len);

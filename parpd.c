@@ -37,6 +37,7 @@ const char copyright[] = "Copyright (c) 2008 Roy Marples";
 #include <net/if.h>
 #ifdef AF_LINK
 #  include <net/if_dl.h>
+#  include <net/if_types.h>
 #endif
 #include <net/if_arp.h>
 #include <netinet/if_ether.h>

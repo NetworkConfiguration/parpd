@@ -1,6 +1,6 @@
 /*
  * parpd - Proxy ARP Daemon
- * Copyright 2008 Roy Marples <roy@marples.name>
+ * Copyright 2008-2009 Roy Marples <roy@marples.name>
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -49,7 +49,7 @@
 #include "bpf-filter.h"
 
 int
-open_arp(struct interface *iface)
+open_arp(struct interface *ifp)
 {
 	int fd = -1;
 	struct ifreq ifr;
@@ -83,7 +83,7 @@ open_arp(struct interface *iface)
 	}
 
 	memset(&ifr, 0, sizeof(ifr));
-	strlcpy(ifr.ifr_name, iface->name, sizeof(ifr.ifr_name));
+	strlcpy(ifr.ifr_name, ifp->ifname, sizeof(ifr.ifr_name));
 	if (ioctl(fd, BIOCSETIF, &ifr) == -1)
 		goto eexit;
 
@@ -91,14 +91,14 @@ open_arp(struct interface *iface)
 	if (ioctl(fd, BIOCGBLEN, &buf_len) == -1)
 		goto eexit;
 	if (iface->buffer_size != (size_t)buf_len) {
-		free(iface->buffer);
-		iface->buffer_size = buf_len;
-		iface->buffer = malloc(buf_len);
-		if (!iface->buffer) {
-			syslog(LOG_ERR, "memory exhausted");
+		free(ifp->buffer);
+		ifp->buffer_size = buf_len;
+		ifp->buffer = malloc(buf_len);
+		if (ifp->buffer == NULL) {
+			syslog(LOG_ERR, "malloc: %m");
 			exit(EXIT_FAILURE);
 		}
-		iface->buffer_len = iface->buffer_pos = 0;
+		ifp->buffer_len = ifp->buffer_pos = 0;
 	}
 
 #ifdef BIOCIMMEDIATE
@@ -114,16 +114,16 @@ open_arp(struct interface *iface)
 	return fd;
 
 eexit:
-	free(iface->buffer);
-	iface->buffer = NULL;
+	free(ifp->buffer);
+	ifp->buffer = NULL;
 	close(fd);
 	return -1;
 }
 
 ssize_t
-send_raw_packet(const struct interface *iface,
-		const uint8_t *hwaddr, size_t hwlen,
-		const void *data, ssize_t len)
+send_raw_packet(const struct interface *ifp,
+    const uint8_t *hwaddr, size_t hwlen,
+    const void *data, ssize_t len)
 {
 	struct iovec iov[2];
 	struct ether_header hw;
@@ -135,47 +135,46 @@ send_raw_packet(const struct interface *iface,
 	iov[0].iov_len = ETHER_HDR_LEN;
 	iov[1].iov_base = UNCONST(data);
 	iov[1].iov_len = len;
-	return writev(iface->fd, iov, 2);
+	return writev(ifp->fd, iov, 2);
 }
 
 /* BPF requires that we read the entire buffer.
  * So we pass the buffer in the API so we can loop on >1 packet. */
 ssize_t
-get_raw_packet(struct interface *iface, void *data, ssize_t len)
+get_raw_packet(struct interface *ifp, void *data, ssize_t len)
 {
 	struct bpf_hdr packet;
 	ssize_t bytes;
 	const unsigned char *payload;
 
 	for (;;) {
-		if (iface->buffer_len == 0) {
-			bytes = read(iface->fd,
-				     iface->buffer, iface->buffer_size);
+		if (ifp->buffer_len == 0) {
+			bytes = read(ifp->fd,
+			    ifp->buffer, ifp->buffer_size);
 			if (bytes == -1)
 				return errno == EAGAIN ? 0 : -1;
 			else if ((size_t)bytes < sizeof(packet))
 				return -1;
-			iface->buffer_len = bytes;
-			iface->buffer_pos = 0;
+			ifp->buffer_len = bytes;
+			ifp->buffer_pos = 0;
 		}
 		bytes = -1;
-		memcpy(&packet, iface->buffer + iface->buffer_pos,
-		       sizeof(packet));
+		memcpy(&packet, ifp->buffer + ifp->buffer_pos, sizeof(packet));
 		if (packet.bh_caplen != packet.bh_datalen)
 			goto next; /* Incomplete packet, drop. */
-		if (iface->buffer_pos + packet.bh_caplen + packet.bh_hdrlen >
-		    iface->buffer_len)
+		if (ifp->buffer_pos + packet.bh_caplen + packet.bh_hdrlen >
+		    ifp->buffer_len)
 			goto next; /* Packet beyond buffer, drop. */
-		payload = iface->buffer + packet.bh_hdrlen + ETHER_HDR_LEN;
+		payload = ifp->buffer + packet.bh_hdrlen + ETHER_HDR_LEN;
 		bytes = packet.bh_caplen - ETHER_HDR_LEN;
 		if (bytes > len)
 			bytes = len;
 		memcpy(data, payload, bytes);
 next:
-		iface->buffer_pos += BPF_WORDALIGN(packet.bh_hdrlen +
-						   packet.bh_caplen);
-		if (iface->buffer_pos >= iface->buffer_len)
-			iface->buffer_len = iface->buffer_pos = 0;
+		ifp->buffer_pos += BPF_WORDALIGN(packet.bh_hdrlen +
+		    packet.bh_caplen);
+		if (ifp->buffer_pos >= ifp->buffer_len)
+			ifp->buffer_len = ifp->buffer_pos = 0;
 		if (bytes != -1)
 			return bytes;
 	}

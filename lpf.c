@@ -1,6 +1,6 @@
 /*
  * parpd - Proxy ARP Daemon
- * Copyright 2008 Roy Marples <roy@marples.name>
+ * Copyright 2008-2009 Roy Marples <roy@marples.name>
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -34,16 +34,14 @@
 #include <netinet/in_systm.h>
 #include <netinet/in.h>
 
-#ifdef __linux__
-# include <asm/types.h> /* needed for 2.4 kernels for the below header */
-# include <linux/filter.h>
-# include <net/ethernet.h>
-# include <netpacket/packet.h>
-# define bpf_insn sock_filter
-# define BPF_SKIPTYPE
-# define BPF_ETHCOOK		-ETH_HLEN
-# define BPF_WHOLEPACKET	0x0fffffff /* work around buggy LPF filters */
-#endif
+#include <asm/types.h> /* needed for 2.4 kernels for the below header */
+#include <linux/filter.h>
+#include <net/ethernet.h>
+#include <netpacket/packet.h>
+#define bpf_insn sock_filter
+#define BPF_SKIPTYPE
+#define BPF_ETHCOOK		-ETH_HLEN
+#define BPF_WHOLEPACKET	0x0fffffff /* work around buggy LPF filters */
 
 #include <errno.h>
 #include <fcntl.h>
@@ -56,7 +54,7 @@
 #include "parpd.h"
 
 int
-open_arp(struct interface *iface)
+open_arp(struct interface *ifp)
 {
 	int s, flags;
 	struct sockaddr_ll sll;
@@ -68,7 +66,7 @@ open_arp(struct interface *iface)
 	memset(&sll, 0, sizeof(sll));
 	sll.sll_family = PF_PACKET;
 	sll.sll_protocol = htons(ETHERTYPE_ARP);
-	if (!(sll.sll_ifindex = if_nametoindex(iface->name))) {
+	if (!(sll.sll_ifindex = if_nametoindex(ifp->ifname))) {
 		errno = ENOENT;
 		goto eexit;
 	}
@@ -91,33 +89,33 @@ eexit:
 }
 
 ssize_t
-send_raw_packet(const struct interface *iface,
-		const uint8_t *hwaddr, size_t hwlen,
-		const void *data, ssize_t len)
+send_raw_packet(const struct interface *ifp,
+    const uint8_t *hwaddr, size_t hwlen,
+    const void *data, ssize_t len)
 {
 	struct sockaddr_ll sll;
 
 	memset(&sll, 0, sizeof(sll));
 	sll.sll_family = AF_PACKET;
 	sll.sll_protocol = htons(ETHERTYPE_ARP);
-	if (!(sll.sll_ifindex = if_nametoindex(iface->name))) {
+	if (!(sll.sll_ifindex = if_nametoindex(ifp->ifname))) {
 		errno = ENOENT;
 		return -1;
 	}
-	sll.sll_hatype = htons(iface->family);
+	sll.sll_hatype = htons(ifp->family);
 	sll.sll_halen = hwlen;
 	memcpy(sll.sll_addr, hwaddr, hwlen);
 
-	return sendto(iface->fd, data, len, 0,
-		      (struct sockaddr *)&sll, sizeof(sll));
+	return sendto(ifp->fd, data, len, 0,
+	    (struct sockaddr *)&sll, sizeof(sll));
 }
 
 ssize_t
-get_raw_packet(struct interface *iface, void *data, ssize_t len)
+get_raw_packet(struct interface *ifp, void *data, ssize_t len)
 {
 	ssize_t bytes;
 
-	bytes = read(iface->fd, data, len);
+	bytes = read(ifp->fd, data, len);
 	if (bytes == -1)
 		return errno == EAGAIN ? 0 : -1;
 	return bytes;

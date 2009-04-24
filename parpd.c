@@ -1,6 +1,6 @@
 /* 
  * parpd - Proxy ARP Daemon
- * Copyright 2008 Roy Marples <roy@marples.name>
+ * Copyright 2008-2009 Roy Marples <roy@marples.name>
  * All rights reserved
 
  * Redistribution and use in source and binary forms, with or without
@@ -27,6 +27,7 @@
 
 const char copyright[] = "Copyright (c) 2008 Roy Marples";
 
+#include <sys/ioctl.h>
 #include <sys/param.h>
 #include <sys/socket.h>
 #include <sys/stat.h>
@@ -34,14 +35,21 @@ const char copyright[] = "Copyright (c) 2008 Roy Marples";
 
 #include <arpa/inet.h>
 #include <net/if.h>
+#ifdef AF_LINK
+#  include <net/if_dl.h>
+#endif
 #include <net/if_arp.h>
 #include <netinet/if_ether.h>
 #include <netinet/in.h>
+#ifdef AF_PACKET
+#  include <netpacket/packet.h>
+#endif
 
 #include <ctype.h>
 #include <errno.h>
 #include <fcntl.h>
 #include <getopt.h>
+#include <ifaddrs.h>
 #include <poll.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -231,25 +239,25 @@ load_config(void)
 	int act, cidr, in_interface;
 	struct in_addr ina;
 	in_addr_t net;
-	struct interface *iface;
+	struct interface *ifp;
 
 	if (stat(cffile, &st) == -1) {
 		free_pents(pents);
-		for (iface = ifaces; iface; iface = iface->next)
-			free_pents(iface->pents);
+		for (ifp = ifaces; ifp; ifp = ifp->next)
+			free_pents(ifp->pents);
 		return -1;
 	}
 	if (config_mtime == st.st_mtime)
 		return 0;
 
 	free_pents(pents);
-	for (iface = ifaces; iface; iface = iface->next)
-		free_pents(iface->pents);
+	for (ifp = ifaces; ifp; ifp = ifp->next)
+		free_pents(ifp->pents);
 	f = fopen(cffile, "r");
 	if (f == NULL)
 		return -1;
 	config_mtime = st.st_mtime;
-	iface = NULL;
+	ifp = NULL;
 	in_interface = 0;
 	while ((buf = fgetln(f, &buf_len))) {
 		e = buf + buf_len;
@@ -263,18 +271,18 @@ load_config(void)
 			act = 0;
 		else if (strcmp(cmd, "interface") == 0) {
 			in_interface = 1;
-			for (iface = ifaces; iface; iface = iface->next)
-				if (strcmp(iface->name, match) == 0)
+			for (ifp = ifaces; ifp; ifp = ifp->next)
+				if (strcmp(ifp->ifname, match) == 0)
 					break;
-			if (!iface)
+			if (ifp == NULL)
 				syslog(LOG_ERR,
-				       "%s: unknown interface", match);
+				    "%s: unknown interface", match);
 			continue;
 		} else {
 			syslog(LOG_ERR, "%s: unknown command", cmd);
 			continue;
 		}
-		if (in_interface && !iface)
+		if (in_interface && ifp == NULL)
 			continue;
 		hwaddr = get_word(&buf, e);
 		if (!match) {
@@ -291,7 +299,7 @@ load_config(void)
 				if (errno == 0 && !*r) {
 					if (cidr < 0 || cidr > 32) {
 						syslog(LOG_DEBUG,
-						       "%s: invalid cidr", p);
+						    "%s: invalid cidr", p);
 						continue;
 					}
 					net <<= (32 - cidr);
@@ -299,7 +307,7 @@ load_config(void)
 				} else {
 					if (inet_aton(p, &ina) == 0) {
 						syslog(LOG_DEBUG,
-						       "%s: invalid mask", p);
+						    "%s: invalid mask", p);
 						continue;
 					}
 					net = ina.s_addr;
@@ -310,19 +318,19 @@ load_config(void)
 			syslog(LOG_DEBUG, "%s: invalid inet addr", match);
 			continue;
 		}
-		if (hwaddr) {
+		if (hwaddr != NULL) {
 			if (*hwaddr == '#' || *hwaddr == ';') {
 				hwaddr = NULL;
 			} else {
 				len = hwaddr_aton(NULL, hwaddr);
 				if (len == 0) {
 					syslog(LOG_DEBUG,
-					       "%s: invalid hw addr", hwaddr);
+					    "%s: invalid hw addr", hwaddr);
 					continue;
 				}
 				if (len > HWADDR_LEN) {
 					syslog(LOG_DEBUG,
-					       "%s: hw addr too long", hwaddr);
+					    "%s: hw addr too long", hwaddr);
 					continue;
 				}
 			}
@@ -336,13 +344,13 @@ load_config(void)
 		pp->action = act;
 		pp->ip = ina.s_addr & net;
 		pp->net = net;
-		if (hwaddr)
-			pp->hwlen = hwaddr_aton(pp->hwaddr, hwaddr);
-		else
+		if (hwaddr == NULL)
 			pp->hwlen = 0;
-		if (iface) {
-			pp->next = iface->pents;
-			iface->pents = pp;
+		else
+			pp->hwlen = hwaddr_aton(pp->hwaddr, hwaddr);
+		if (ifp) {
+			pp->next = ifp->pents;
+			ifp->pents = pp;
 		} else {
 			pp->next = pents;
 			pents = pp;
@@ -364,9 +372,9 @@ proxy(const struct pent *ps, in_addr_t ip, const uint8_t **hw, size_t *hwlen)
 		if (pp->ip == (ip & pp->net) ||
 		    pp->ip == INADDR_ANY) {
 			if (pp->action == 1) {
-				if (hw)
+				if (hw != NULL)
 					*hw = pp->hwaddr;
-				if (hwlen)
+				if (hwlen != NULL)
 					*hwlen = pp->hwlen;
 			}
 			return pp->action;
@@ -375,12 +383,12 @@ proxy(const struct pent *ps, in_addr_t ip, const uint8_t **hw, size_t *hwlen)
 	return 0;
 }
 
-#define ARP_LEN \
+#define ARP_LEN								      \
 	(sizeof(struct arphdr) + (2 * sizeof(uint32_t)) + (2 * HWADDR_LEN))
 /* Does what is says on the tin - sends an ARP message */
 static int
-send_arp(const struct interface *iface, int op, size_t hlen,
-	 const uint8_t *sha, in_addr_t sip, const uint8_t *tha, in_addr_t tip)
+send_arp(const struct interface *ifp, int op, size_t hlen,
+    const uint8_t *sha, in_addr_t sip, const uint8_t *tha, in_addr_t tip)
 {
 	uint8_t arp_buffer[ARP_LEN];
 	struct arphdr ar;
@@ -388,7 +396,7 @@ send_arp(const struct interface *iface, int op, size_t hlen,
 	uint8_t *p;
 	int retval;
 
-	ar.ar_hrd = htons(iface->family);
+	ar.ar_hrd = htons(ifp->family);
 	ar.ar_pro = htons(ETHERTYPE_IP);
 	ar.ar_hln = hlen;
 	ar.ar_pln = sizeof(sip);
@@ -404,13 +412,13 @@ send_arp(const struct interface *iface, int op, size_t hlen,
 	memcpy(p, &tip, sizeof(tip));
 	p += sizeof(tip);
 	len = p - arp_buffer;
-	retval = send_raw_packet(iface, tha, hlen, arp_buffer, len);
+	retval = send_raw_packet(ifp, tha, hlen, arp_buffer, len);
 	return retval;
 }
 
 /* Checks an incoming ARP message to see if we should proxy for it. */
 static void
-handle_arp(struct interface *iface)
+handle_arp(struct interface *ifp)
 {
 	uint8_t arp_buffer[ARP_LEN], *shw, *thw;
 	const uint8_t *phw;
@@ -421,7 +429,7 @@ handle_arp(struct interface *iface)
 	struct in_addr ina;
 
 	for(;;) {
-		bytes = get_raw_packet(iface, arp_buffer, sizeof(arp_buffer));
+		bytes = get_raw_packet(ifp, arp_buffer, sizeof(arp_buffer));
 		if (bytes == 0 || bytes == -1)
 			return;
 		/* We must have a full ARP header */
@@ -445,39 +453,143 @@ handle_arp(struct interface *iface)
 		if ((thw + ar.ar_hln + ar.ar_pln) - arp_buffer > bytes)
 			continue;
 		/* Ignore messages from ourself */
-		if (ar.ar_hln == iface->hwlen &&
-		    memcmp(shw, iface->hwaddr, iface->hwlen) == 0)
+		if (ar.ar_hln == ifp->hwlen &&
+		    memcmp(shw, ifp->hwaddr, ifp->hwlen) == 0)
 			continue;
 		/* Copy out the IP addresses */
 		memcpy(&tip, thw + ar.ar_hln, ar.ar_pln);
 		memcpy(&sip, shw + ar.ar_hln, ar.ar_pln);
 		ina.s_addr = tip;
 		syslog(LOG_DEBUG, "%s: received ARPOP_REQUEST for %s",
-		       iface->name, inet_ntoa(ina));
-		if (proxy(iface->pents, tip, &phw, &hwlen) != 1 &&
+		    ifp->ifname, inet_ntoa(ina));
+		if (proxy(ifp->pents, tip, &phw, &hwlen) != 1 &&
 		    proxy(pents, tip, &phw, &hwlen) != 1)
 			continue;
-		if (!hwlen) {
-			phw = iface->hwaddr;
-			hwlen = iface->hwlen;
+		if (hwlen == 0) {
+			phw = ifp->hwaddr;
+			hwlen = ifp->hwlen;
 		}
 		/* Our address lengths need to be the same */
-		if (hwlen != iface->hwlen) {
+		if (hwlen != ifp->hwlen) {
 			syslog(LOG_DEBUG, "%s: hwlen different, not replying",
-			       iface->name);
+			    ifp->ifname);
 			continue;
 		}
 		ina.s_addr = tip;
 		syslog(LOG_INFO, "%s: sending ARPOP_REPLY %s (%s)",
-		       iface->name, inet_ntoa(ina), hwaddr_ntoa(phw, hwlen));
-		send_arp(iface, ARPOP_REPLY, hwlen, phw, tip, shw, sip);
+		    ifp->ifname, inet_ntoa(ina), hwaddr_ntoa(phw, hwlen));
+		send_arp(ifp, ARPOP_REPLY, hwlen, phw, tip, shw, sip);
 	}
+}
+
+static struct interface *
+discover_interfaces(int argc, char * const *argv)
+{
+	struct ifaddrs *ifaddrs, *ifa;
+	struct ifreq ifr;
+	int s, i;
+	struct interface *ifp, *ifs;
+#ifdef AF_LINK
+	const struct sockaddr_dl *sdl;
+#elif AF_PACKET
+	const struct sockaddr_ll *sll;
+#endif
+
+	if ((s = socket(AF_INET, SOCK_DGRAM, 0)) == -1) {
+		syslog(LOG_ERR, "socket: %m");
+		return NULL;
+	}
+	if (getifaddrs(&ifaddrs) == -1) {
+		syslog(LOG_ERR, "getifaddrs: %m");
+		close(s);
+		return NULL;
+	}
+
+	ifs = NULL;
+	for (ifa = ifaddrs; ifa; ifa = ifa->ifa_next) {
+#ifdef AF_LINK
+		if (ifa->ifa_addr->sa_family != AF_LINK)
+			continue;
+#elif AF_PACKET
+		if (ifa->ifa_addr->sa_family != AF_PACKET)
+			continue;
+#endif
+		if (argc > 0) {
+			for (i = 0; i < argc; i++)
+				if (strcmp(argv[i], ifa->ifa_name) == 0)
+					break;
+			if (i == argc)
+				continue;
+		}
+
+		/* It's possible for an interface to have >1 AF_LINK.
+		 * For our purposes, we use the first one. */
+		for (ifp = ifs; ifp; ifp = ifp->next)
+			if (strcmp(ifp->ifname, ifa->ifa_name) == 0)
+				break;
+		if (ifp)
+			continue;
+
+		memset(&ifr, 0, sizeof(ifr));
+		strlcpy(ifr.ifr_name, ifa->ifa_name, sizeof(ifr.ifr_name));
+		if (ioctl(s, SIOCGIFFLAGS, &ifr) == -1) {
+			syslog(LOG_ERR, "%s: SIOGIFFLAGS: %m", ifa->ifa_name);
+			continue;
+		}
+		if (ifr.ifr_flags & IFF_LOOPBACK ||
+		    ifr.ifr_flags & IFF_POINTOPOINT ||
+		    ifr.ifr_flags & IFF_NOARP)
+			continue;
+
+		ifp = malloc(sizeof(*ifp));
+		if (ifp == NULL) {
+			syslog(LOG_ERR, "malloc: %m");
+			break;
+		}
+		strlcpy(ifp->ifname, ifa->ifa_name, sizeof(ifp->ifname));
+
+#ifdef AF_LINK
+		sdl = (const struct sockaddr_dl *)(void *)ifa->ifa_addr;
+		switch(sdl->sdl_type) {
+		case IFT_ETHER:
+			ifp->family = ARPHRD_ETHER;
+			break;
+		case IFT_IEEE1394:
+			ifp->family = ARPHRD_IEEE1394;
+			break;
+		}
+		ifp->hwlen = sdl->sdl_alen;
+#ifndef CLLADDR
+#  define CLLADDR(s) ((const char *)((s)->sdl_data + (s)->sdl_nlen))
+#endif
+		memcpy(ifp->hwaddr, CLLADDR(sdl), ifp->hwlen);
+#elif AF_PACKET
+		sll = (const struct sockaddr_ll *)(void *)ifa->ifa_addr;
+		ifp->family = sll->sll_hatype;
+		ifp->hwlen = sll->sll_halen;
+		if (ifp->hwlen != 0)
+			memcpy(ifp->hwaddr, sll->sll_addr, ifp->hwlen);
+#endif
+
+		ifp->fd = open_arp(ifp);
+		if (ifp->fd == -1) {
+			syslog(LOG_ERR, "open_arp %s: %m", ifp->ifname);
+			free(ifp);
+		} else {
+			ifp->pents = NULL;
+			ifp->next = ifs;
+			ifs = ifp;
+		}
+	}
+	freeifaddrs(ifaddrs);
+	close(s);
+	return ifs;
 }
 
 int
 main(int argc, char **argv)
 {
-	struct interface *iface, *ifl, *ifn;
+	struct interface *ifp, *ifl, *ifn;
 	int opt, fflag = 0;
 	int nfds = 0, i;
 	struct pollfd *fds;
@@ -510,16 +622,15 @@ main(int argc, char **argv)
 
 	ifaces = discover_interfaces(argc, argv);
 	for (i = 0; i < argc; i++) {
-		for (iface = ifaces; iface; iface = iface->next)
-			if (strcmp(iface->name, argv[i]) == 0)
+		for (ifp = ifaces; ifp; ifp = ifp->next)
+			if (strcmp(ifp->ifname, argv[i]) == 0)
 				break;
-		if (!iface) {
-			syslog(LOG_ERR, "%s: no such interface",
-			       argv[i]);
+		if (ifp == NULL) {
+			syslog(LOG_ERR, "%s: no such interface", argv[i]);
 			exit(EXIT_FAILURE);
 		}
 	}
-	if (!ifaces) {
+	if (ifaces == NULL) {
 		syslog(LOG_ERR, "no suitable interfaces found");
 		exit(EXIT_FAILURE);
 	}
@@ -528,25 +639,22 @@ main(int argc, char **argv)
 		syslog(LOG_ERR, "%s: %m", cffile);
 		exit(EXIT_FAILURE);
 	}
-	if (!pents) {
+	if (pents == NULL) {
 		/* No global entries, so remove interfaces without any
 		 * either as they'll do nothing. */
 		ifl = NULL;
-		for (iface = ifaces;
-		     iface && (ifn = iface->next, 1);
-		     iface = ifn)
-		{
-			if (iface->pents) {
-				ifl = iface;
+		for (ifp = ifaces; ifp && (ifn = ifp->next, 1); ifp = ifn) {
+			if (ifp->pents != NULL) {
+				ifl = ifp;
 				continue;
 			}
-			if (ifl)
-				ifl->next = iface->next;
+			if (ifl == NULL)
+				ifaces = ifp->next;
 			else
-				ifaces = iface->next;
-			free(iface);
+				ifl->next = ifp->next;
+			free(ifp);
 		}
-		if (!ifaces) {
+		if (ifaces == NULL) {
 			syslog(LOG_ERR, "%s: no valid entries", cffile);
 			exit(EXIT_FAILURE);
 		}
@@ -558,17 +666,17 @@ main(int argc, char **argv)
 	}
 
 	nfds = 0;
-	for (iface = ifaces; iface; iface = iface->next)
+	for (ifp = ifaces; ifp; ifp = ifp->next)
 		nfds++;
 	fds = malloc(sizeof(*fds) * nfds);
-	if (!fds) {
-		syslog(LOG_ERR, "memory exhausted");
+	if (fds == NULL) {
+		syslog(LOG_ERR, "malloc: %m");
 		exit(EXIT_FAILURE);
 	}
 	i = 0;
-	for (iface = ifaces; iface; iface = iface->next) {
-		syslog(LOG_DEBUG, "proxying on %s", iface->name);
-		fds[i].fd = iface->fd;
+	for (ifp = ifaces; ifp; ifp = ifp->next) {
+		syslog(LOG_DEBUG, "proxying on %s", ifp->ifname);
+		fds[i].fd = ifp->fd;
 		fds[i].events = POLLIN;
 		fds[i].revents = 0;
 		i++;
@@ -587,8 +695,9 @@ main(int argc, char **argv)
 		for (i = 0; i < nfds; i++) {
 			if (!(fds[i].revents & (POLLIN | POLLHUP)))
 				continue;
-			for (iface = ifaces; iface; iface = iface->next)
-				handle_arp(iface);
+			for (ifp = ifaces; ifp; ifp = ifp->next)
+				if (fds[i].fd == ifp->fd)
+					handle_arp(ifp);
 		}
 	}
 	/* NOTREACHED */

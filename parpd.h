@@ -1,6 +1,6 @@
 /* 
  * parpd - Proxy ARP Daemon
- * Copyright 2008 Roy Marples <roy@marples.name>
+ * Copyright 2008-2009 Roy Marples <roy@marples.name>
  * All rights reserved
 
  * Redistribution and use in source and binary forms, with or without
@@ -32,7 +32,7 @@
 
 #define VERSION			"1.3"
 #ifndef SYSCONFDIR
-# define SYSCONFDIR		"/etc"
+#  define SYSCONFDIR		"/etc"
 #endif
 #define PARPD_CONF		SYSCONFDIR "/parpd.conf"
 
@@ -49,7 +49,7 @@ struct pent {
 
 struct interface
 {
-	char name[IF_NAMESIZE];
+	char ifname[IF_NAMESIZE];
 	int family;
 	unsigned char hwaddr[HWADDR_LEN];
 	size_t hwlen;
@@ -60,11 +60,9 @@ struct interface
 	struct interface *next;
 };
 
-struct interface *discover_interfaces(int, char * const*);
-
 int open_arp(struct interface *);
 ssize_t send_raw_packet(const struct interface *,
-			const uint8_t *, size_t, const void *, ssize_t);
+    const uint8_t *, size_t, const void *, ssize_t);
 ssize_t get_raw_packet(struct interface *, void *, ssize_t);
 
 #define UNCONST(a)		((void *)(unsigned long)(const void *)(a))
@@ -72,8 +70,8 @@ ssize_t get_raw_packet(struct interface *, void *, ssize_t);
 /* Only GLIBC doesn't support strlcpy */
 #ifdef __GLIBC__
 #  if !defined(__UCLIBC__) && !defined (__dietlibc__)
-#   include <stdio.h>
-#   define strlcpy(dst, src, len) snprintf(dst, len, "%s", src)
+#    include <stdio.h>
+#    define strlcpy(dst, src, len) snprintf(dst, len, "%s", src)
 #  endif
 #endif
 

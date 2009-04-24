@@ -552,8 +552,10 @@ main(int argc, char **argv)
 		}
 	}
 
-	if (!fflag)
-		daemon(0, 0);
+	if (!fflag && daemon(0, 0) == -1) {
+		syslog(LOG_ERR, "daemon: %m");
+		exit(EXIT_FAILURE);
+	}
 
 	nfds = 0;
 	for (iface = ifaces; iface; iface = iface->next)

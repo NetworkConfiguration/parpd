@@ -6,6 +6,7 @@
 CLEANFILES+=	.depend
 
 .depend: ${SRCS}
+	rm -f .depend
 	${CC} ${CFLAGS} -MM ${SRCS} > .depend
 
 depend: .depend

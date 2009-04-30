@@ -1,0 +1,6 @@
+.depend
+*.o
+*.core
+*.bz2
+parpd
+parpd.8

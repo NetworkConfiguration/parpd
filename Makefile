@@ -1,6 +1,6 @@
 # Makefile based on BSD make.
 # Our mk stubs also work with GNU make.
-# Copyright 2008 Roy Marples <roy@marples.name>
+# Copyright (c) 2008 Roy Marples <roy@marples.name>
 
 PROG=		parpd
 SRCS=		parpd.c ${SRC_PF}

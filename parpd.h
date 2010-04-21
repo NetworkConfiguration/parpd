@@ -30,7 +30,7 @@
 
 #include <net/if.h>
 
-#define VERSION			"1.4"
+#define VERSION			"1.5"
 #ifndef SYSCONFDIR
 #  define SYSCONFDIR		"/etc"
 #endif

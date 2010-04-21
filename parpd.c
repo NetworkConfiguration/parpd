@@ -542,7 +542,7 @@ discover_interfaces(int argc, char * const *argv)
 		    ifr.ifr_flags & IFF_NOARP)
 			continue;
 
-		ifp = malloc(sizeof(*ifp));
+		ifp = calloc(1, sizeof(*ifp));
 		if (ifp == NULL) {
 			syslog(LOG_ERR, "malloc: %m");
 			break;

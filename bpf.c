@@ -53,6 +53,7 @@ open_arp(struct interface *ifp)
 {
 	int fd = -1;
 	struct ifreq ifr;
+	unsigned char *buf;
 	int buf_len = 0;
 	struct bpf_version pv;
 	struct bpf_program pf;
@@ -91,13 +92,13 @@ open_arp(struct interface *ifp)
 	if (ioctl(fd, BIOCGBLEN, &buf_len) == -1)
 		goto eexit;
 	if (ifp->buffer_size != (size_t)buf_len) {
-		free(ifp->buffer);
-		ifp->buffer_size = buf_len;
-		ifp->buffer = malloc(buf_len);
-		if (ifp->buffer == NULL) {
+		buf = realloc(ifp->buffer, buf_len);
+		if (buf == NULL) {
 			syslog(LOG_ERR, "malloc: %m");
 			exit(EXIT_FAILURE);
 		}
+		ifp->buffer = buf;
+		ifp->buffer_size = buf_len;
 		ifp->buffer_len = ifp->buffer_pos = 0;
 	}
 

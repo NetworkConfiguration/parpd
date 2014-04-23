@@ -1,6 +1,6 @@
 /*
  * parpd - Proxy ARP Daemon
- * Copyright (c) 2008-2009 Roy Marples <roy@marples.name>
+ * Copyright (c) 2008-2014 Roy Marples <roy@marples.name>
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -91,7 +91,7 @@ eexit:
 ssize_t
 send_raw_packet(const struct interface *ifp,
     const uint8_t *hwaddr, size_t hwlen,
-    const void *data, ssize_t len)
+    const void *data, size_t len)
 {
 	struct sockaddr_ll sll;
 
@@ -111,7 +111,7 @@ send_raw_packet(const struct interface *ifp,
 }
 
 ssize_t
-get_raw_packet(struct interface *ifp, void *data, ssize_t len)
+get_raw_packet(struct interface *ifp, void *data, size_t len)
 {
 	ssize_t bytes;
 

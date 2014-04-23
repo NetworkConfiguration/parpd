@@ -12,12 +12,11 @@ _CCFLAGS=	-Wall -Wextra -Wimplicit -Wshadow -Wformat=2 \
 		-Wredundant-decls  -Wnested-externs \
 		-Winline -Wwrite-strings -Wcast-align -Wcast-qual \
 		-Wpointer-arith \
-		-Wdeclaration-after-statement -Wsequence-point
-_CC_FLAGS_SH=	if ! test -d .git && ! test -d .svn; \
+		-Wdeclaration-after-statement -Wsequence-point -Wconversion
+_CC_FLAGS!=	if ! test -f .fslckout && ! test -d .git && ! test -d .svn; \
 		then echo ""; else for f in ${_CCFLAGS}; do \
 		if echo "int main(void) { return 0;} " | \
 		${CC} $$f -S -xc -o /dev/null - ; \
 		then printf "%s" "$$f "; fi \
 		done; fi
-_CC_FLAGS!=	${_CC_FLAGS_SH}
-CFLAGS+=	${_CC_FLAGS}$(shell ${_CC_FLAGS_SH})
+CFLAGS+=	${_CC_FLAGS}

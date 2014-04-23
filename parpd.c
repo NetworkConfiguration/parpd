@@ -1,6 +1,6 @@
-/* 
+/*
  * parpd - Proxy ARP Daemon
- * Copyright (c) 2008-2009 Roy Marples <roy@marples.name>
+ * Copyright (c) 2008-2014 Roy Marples <roy@marples.name>
  * All rights reserved
 
  * Redistribution and use in source and binary forms, with or without
@@ -25,7 +25,7 @@
  * SUCH DAMAGE.
  */
 
-const char copyright[] = "Copyright (c) 2008 Roy Marples";
+const char copyright[] = "Copyright (c) 2008-2014 Roy Marples";
 
 #include <sys/ioctl.h>
 #include <sys/param.h>
@@ -234,10 +234,10 @@ load_config(void)
 {
 	struct stat st;
 	FILE *f;
-	char *buf, *cmd, *match, *hwaddr, *p, *e, *r;
+	char *buf, *cmd, *match, *hwaddr, *p, *e, *r, act;
 	size_t buf_len, len;
 	struct pent *pp;
-	int act, cidr, in_interface;
+	int cidr, in_interface;
 	struct in_addr ina;
 	in_addr_t net;
 	struct interface *ifp;
@@ -399,7 +399,7 @@ send_arp(const struct interface *ifp, int op, size_t hlen,
 
 	ar.ar_hrd = htons(ifp->family);
 	ar.ar_pro = htons(ETHERTYPE_IP);
-	ar.ar_hln = hlen;
+	ar.ar_hln = (uint8_t)hlen;
 	ar.ar_pln = sizeof(sip);
 	ar.ar_op = htons(op);
 	memcpy(arp_buffer, &ar, sizeof(ar));
@@ -412,7 +412,7 @@ send_arp(const struct interface *ifp, int op, size_t hlen,
 	p += hlen;
 	memcpy(p, &tip, sizeof(tip));
 	p += sizeof(tip);
-	len = p - arp_buffer;
+	len = (size_t)(p - arp_buffer);
 	retval = send_raw_packet(ifp, tha, hlen, arp_buffer, len);
 	return retval;
 }
@@ -592,7 +592,8 @@ main(int argc, char **argv)
 {
 	struct interface *ifp, *ifl, *ifn;
 	int opt, fflag = 0;
-	int nfds = 0, i;
+	nfds_t nfds = 0, nfdsi;
+	int i;
 	struct pollfd *fds;
 
 	openlog("parpd", LOG_PERROR, LOG_DAEMON);
@@ -693,11 +694,11 @@ main(int argc, char **argv)
 		}
 		if (i == 0)
 			continue; /* should never happen */
-		for (i = 0; i < nfds; i++) {
-			if (!(fds[i].revents & (POLLIN | POLLHUP)))
+		for (nfdsi = 0; nfdsi < nfds; nfdsi++) {
+			if (!(fds[nfdsi].revents & (POLLIN | POLLHUP)))
 				continue;
 			for (ifp = ifaces; ifp; ifp = ifp->next)
-				if (fds[i].fd == ifp->fd)
+				if (fds[nfdsi].fd == ifp->fd)
 					handle_arp(ifp);
 		}
 	}

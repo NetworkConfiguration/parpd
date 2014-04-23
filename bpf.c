@@ -1,6 +1,6 @@
 /*
  * parpd - Proxy ARP Daemon
- * Copyright (c) 2008-2009 Roy Marples <roy@marples.name>
+ * Copyright (c) 2008-2014 Roy Marples <roy@marples.name>
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -54,7 +54,8 @@ open_arp(struct interface *ifp)
 	int fd = -1;
 	struct ifreq ifr;
 	unsigned char *buf;
-	int buf_len = 0;
+	int ibuf_len = 0;
+	size_t buf_len;
 	struct bpf_version pv;
 	struct bpf_program pf;
 #ifdef BIOCIMMEDIATE
@@ -89,9 +90,10 @@ open_arp(struct interface *ifp)
 		goto eexit;
 
 	/* Get the required BPF buffer length from the kernel. */
-	if (ioctl(fd, BIOCGBLEN, &buf_len) == -1)
+	if (ioctl(fd, BIOCGBLEN, &ibuf_len) == -1)
 		goto eexit;
-	if (ifp->buffer_size != (size_t)buf_len) {
+	buf_len = (size_t)ibuf_len;
+	if (ifp->buffer_size != buf_len) {
 		buf = realloc(ifp->buffer, buf_len);
 		if (buf == NULL) {
 			syslog(LOG_ERR, "malloc: %m");
@@ -124,7 +126,7 @@ eexit:
 ssize_t
 send_raw_packet(const struct interface *ifp,
     const uint8_t *hwaddr, size_t hwlen,
-    const void *data, ssize_t len)
+    const void *data, size_t len)
 {
 	struct iovec iov[2];
 	struct ether_header hw;
@@ -142,7 +144,7 @@ send_raw_packet(const struct interface *ifp,
 /* BPF requires that we read the entire buffer.
  * So we pass the buffer in the API so we can loop on >1 packet. */
 ssize_t
-get_raw_packet(struct interface *ifp, void *data, ssize_t len)
+get_raw_packet(struct interface *ifp, void *data, size_t len)
 {
 	struct bpf_hdr packet;
 	ssize_t bytes;
@@ -156,7 +158,7 @@ get_raw_packet(struct interface *ifp, void *data, ssize_t len)
 				return errno == EAGAIN ? 0 : -1;
 			else if ((size_t)bytes < sizeof(packet))
 				return -1;
-			ifp->buffer_len = bytes;
+			ifp->buffer_len = (size_t)bytes;
 			ifp->buffer_pos = 0;
 		}
 		bytes = -1;
@@ -166,11 +168,12 @@ get_raw_packet(struct interface *ifp, void *data, ssize_t len)
 		if (ifp->buffer_pos + packet.bh_caplen + packet.bh_hdrlen >
 		    ifp->buffer_len)
 			goto next; /* Packet beyond buffer, drop. */
-		payload = ifp->buffer + packet.bh_hdrlen + ETHER_HDR_LEN;
-		bytes = packet.bh_caplen - ETHER_HDR_LEN;
-		if (bytes > len)
-			bytes = len;
-		memcpy(data, payload, bytes);
+		payload = ifp->buffer + ifp->buffer_pos + \
+		    packet.bh_hdrlen + ETHER_HDR_LEN;
+		bytes = (ssize_t)packet.bh_caplen - ETHER_HDR_LEN;
+		if ((size_t)bytes > len)
+			bytes = (ssize_t)len;
+		memcpy(data, payload, (size_t)bytes);
 next:
 		ifp->buffer_pos += BPF_WORDALIGN(packet.bh_hdrlen +
 		    packet.bh_caplen);

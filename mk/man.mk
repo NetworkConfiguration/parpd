@@ -1,20 +1,14 @@
 # rules to install manpages
 # Copyright 2008 Roy Marples <roy@marples.name>
 
-_MANPREFIX_SH=	if test "${PREFIX}" = "/usr"; then echo "/usr/share"; else echo "${PREFIX}"; fi
-_MANPREFIX!=	${_MANPREFIX_SH}
-MANPREFIX?=	${_MANPREFIX}$(shell ${_MANPREFIX_SH})
+_MANPREFIX!=	if test "${PREFIX}" = "/usr"; then echo "/usr/share"; else echo "${PREFIX}"; fi
+MANPREFIX?=	${_MANPREFIX}
 
 MANDIR?=	${MANPREFIX}/man/man
 MANMODE?=	0444
 
-_MAN5_SH=	for man in ${MAN}; do case $$man in *.5) echo $$man;; esac; done
-_MAN5!=		${_MAN5_SH}
-MAN5=		${_MAN5}$(shell ${_MAN5_SH})
-
-_MAN8_SH=	for man in ${MAN}; do case $$man in *.8) echo $$man;; esac; done
-_MAN8!=		${_MAN8_SH}
-MAN8=		${_MAN8}$(shell ${_MAN8_SH})
+MAN5!=	for man in ${MAN}; do case $$man in *.5) echo $$man;; esac; done
+MAN8!=	for man in ${MAN}; do case $$man in *.8) echo $$man;; esac; done
 
 _man: ${MAN}
 

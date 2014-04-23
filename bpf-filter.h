@@ -1,6 +1,6 @@
 /*
- * parpd - Proxy ARP Daemon
- * Copyright (c) 2008 Roy Marples <roy@marples.name>
+ * dhcpcd - DHCP client daemon
+ * Copyright (c) 2006-2014 Roy Marples <roy@marples.name>
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -30,7 +30,7 @@
 #ifndef BPF_WHOLEPACKET
 # define BPF_WHOLEPACKET ~0U
 #endif
-static const struct bpf_insn const arp_bpf_filter [] = {
+static const struct bpf_insn arp_bpf_filter [] = {
 #ifndef BPF_SKIPTYPE
 	/* Make sure this is an ARP packet... */
 	BPF_STMT(BPF_LD + BPF_H + BPF_ABS, 12),
@@ -44,5 +44,4 @@ static const struct bpf_insn const arp_bpf_filter [] = {
 	/* Otherwise, drop it. */
 	BPF_STMT(BPF_RET + BPF_K, 0),
 };
-static const size_t arp_bpf_filter_len =
-    sizeof(arp_bpf_filter) / sizeof(arp_bpf_filter[0]);
+#define arp_bpf_filter_len sizeof(arp_bpf_filter) / sizeof(arp_bpf_filter[0])

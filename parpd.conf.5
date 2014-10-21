@@ -22,7 +22,7 @@
 .\" OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
 .\" SUCH DAMAGE.
 .\"
-.Dd October 14, 2008
+.Dd October 21, 2014
 .Dt PARPD.CONF 5 SMM
 .Os
 .Sh NAME
@@ -48,19 +48,25 @@ has the format:
 .Pp
 Valid commands are 
 .Sy proxy ,
+.Sy halfproxy ,
 .Sy ignore
 and
 .Sy interface .
+The
+.Sy halfproxy
+command is the same as
+.Sy proxy ,
+but will ignore requests from an unspecified address.
+Using the
+.Sy interface
+command, you can specify an interface on which all subsequent commands
+are only used on.
 Inet addresses are specified in the conventional dot
 .Pq Dq \&.
 notation with an optional
 .Sy cidr
 or
 .Sy netmask .
-Using the
-.Sy interface
-command, you can specify an interface on which all subsequent commands
-are only used on.
 Hardware addresses are expressed as six hexadecimal numbers separated
 by colons, e.g. "08:00:20:00:5a:bc".
 .Sh SEE ALSO

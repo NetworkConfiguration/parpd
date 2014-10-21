@@ -237,7 +237,8 @@ load_config(void)
 	char *buf, *cmd, *match, *hwaddr, *p, *e, *r, act;
 	size_t buf_len, len;
 	struct pent *pp;
-	int cidr, in_interface;
+	long cidr;
+	int in_interface;
 	struct in_addr ina;
 	in_addr_t net;
 	struct interface *ifp;
@@ -267,9 +268,12 @@ load_config(void)
 			continue;
 		match = get_word(&buf, e);
 		if (strcmp(cmd, "proxy") == 0)
-			act = 1;
+			act = PARPD_PROXY;
+		else if (strcmp(cmd, "half") == 0 ||
+		    strcmp(cmd, "halfproxy") == 0)
+			act = PARPD_HALFPROXY;
 		else if (strcmp(cmd, "ignore") == 0)
-			act = 0;
+			act = PARPD_IGNORE;
 		else if (strcmp(cmd, "interface") == 0) {
 			in_interface = 1;
 			for (ifp = ifaces; ifp; ifp = ifp->next)
@@ -381,13 +385,13 @@ proxy(const struct pent *ps, in_addr_t ip, const uint8_t **hw, size_t *hwlen)
 			return pp->action;
 		}
 	}
-	return 0;
+	return PARPD_IGNORE;
 }
 
 #define ARP_LEN								      \
 	(sizeof(struct arphdr) + (2 * sizeof(uint32_t)) + (2 * HWADDR_LEN))
 /* Does what is says on the tin - sends an ARP message */
-static int
+static ssize_t
 send_arp(const struct interface *ifp, int op, size_t hlen,
     const uint8_t *sha, in_addr_t sip, const uint8_t *tha, in_addr_t tip)
 {
@@ -395,7 +399,6 @@ send_arp(const struct interface *ifp, int op, size_t hlen,
 	struct arphdr ar;
 	size_t len;
 	uint8_t *p;
-	int retval;
 
 	ar.ar_hrd = htons(ifp->family);
 	ar.ar_pro = htons(ETHERTYPE_IP);
@@ -413,8 +416,7 @@ send_arp(const struct interface *ifp, int op, size_t hlen,
 	memcpy(p, &tip, sizeof(tip));
 	p += sizeof(tip);
 	len = (size_t)(p - arp_buffer);
-	retval = send_raw_packet(ifp, tha, hlen, arp_buffer, len);
-	return retval;
+	return send_raw_packet(ifp, tha, hlen, arp_buffer, len);
 }
 
 /* Checks an incoming ARP message to see if we should proxy for it. */
@@ -428,6 +430,7 @@ handle_arp(struct interface *ifp)
 	size_t hwlen;
 	ssize_t bytes;
 	struct in_addr ina;
+	int action;
 
 	for(;;) {
 		bytes = get_raw_packet(ifp, arp_buffer, sizeof(arp_buffer));
@@ -463,8 +466,19 @@ handle_arp(struct interface *ifp)
 		ina.s_addr = tip;
 		syslog(LOG_DEBUG, "%s: received ARPOP_REQUEST for %s",
 		    ifp->ifname, inet_ntoa(ina));
-		if (proxy(ifp->pents, tip, &phw, &hwlen) != 1 &&
-		    proxy(pents, tip, &phw, &hwlen) != 1)
+		if ((action = proxy(ifp->pents, tip, &phw, &hwlen)) == -1) {
+			syslog(LOG_ERR, "proxy: %m");
+			continue;
+		}
+		if (action == PARPD_IGNORE &&
+		    (action = proxy(pents, tip, &phw, &hwlen)) == -1)
+		{
+			syslog(LOG_ERR, "proxy: %m");
+			continue;
+		}
+		if (action == PARPD_IGNORE)
+			continue;
+		if (action == PARPD_HALFPROXY && sip == INADDR_ANY)
 			continue;
 		if (hwlen == 0) {
 			phw = ifp->hwaddr;

@@ -36,7 +36,11 @@
 #endif
 #define PARPD_CONF		SYSCONFDIR "/parpd.conf"
 
-#define HWADDR_LEN 20
+#define HWADDR_LEN		20
+
+#define PARPD_IGNORE		0
+#define PARPD_PROXY		1
+#define PARPD_HALFPROXY		2
 
 struct pent {
 	char action;

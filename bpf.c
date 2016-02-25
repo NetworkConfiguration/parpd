@@ -1,6 +1,6 @@
 /*
  * parpd - Proxy ARP Daemon
- * Copyright (c) 2008-2014 Roy Marples <roy@marples.name>
+ * Copyright (c) 2008-2016 Roy Marples <roy@marples.name>
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -42,7 +42,6 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <syslog.h>
 #include <unistd.h>
 
 #include "parpd.h"
@@ -79,8 +78,9 @@ open_arp(struct interface *ifp)
 	if (ioctl(fd, BIOCVERSION, &pv) == -1)
 		goto eexit;
 	if (pv.bv_major != BPF_MAJOR_VERSION ||
-	    pv.bv_minor < BPF_MINOR_VERSION) {
-		syslog(LOG_ERR, "BPF version mismatch - recompile");
+	    pv.bv_minor < BPF_MINOR_VERSION)
+	{
+		errno = EINVAL;
 		goto eexit;
 	}
 
@@ -95,10 +95,8 @@ open_arp(struct interface *ifp)
 	buf_len = (size_t)ibuf_len;
 	if (ifp->buffer_size != buf_len) {
 		buf = realloc(ifp->buffer, buf_len);
-		if (buf == NULL) {
-			syslog(LOG_ERR, "malloc: %m");
-			exit(EXIT_FAILURE);
-		}
+		if (buf == NULL)
+			goto eexit;
 		ifp->buffer = buf;
 		ifp->buffer_size = buf_len;
 		ifp->buffer_len = ifp->buffer_pos = 0;

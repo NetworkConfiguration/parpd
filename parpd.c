@@ -378,10 +378,8 @@ proxy(const struct pent *ps, in_addr_t ip, const uint8_t **hw, size_t *hwlen)
 		    pp->ip == INADDR_ANY)
 		{
 			if (pp->action) {
-				if (hw != NULL)
-					*hw = pp->hwaddr;
-				if (hwlen != NULL)
-					*hwlen = pp->hwlen;
+				*hw = pp->hwaddr;
+				*hwlen = pp->hwlen;
 			}
 			return pp->action;
 		}

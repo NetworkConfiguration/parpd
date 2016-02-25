@@ -73,64 +73,6 @@ usage(void)
 	printf("usage: parpd [-dfl] [-c file] [interface [...]]\n");
 }
 
-#ifndef BSD
-/* fgetln is a BSD specific function.
- * This implementation only supports one buffer instead of one per stream. */
-static char *
-fgetln(FILE *stream, size_t *len)
-{
-	static char *fbuf;
-	static size_t fbuf_len;
-
-#if defined(__GLIBC__) && defined(_GNU_SOURCE)
-	/* glibc has the getline function which is almost equivalent.
-	 * Some libc's claim to emulate glibc, but lack glibc extensions
-	 * like getline, so to get this you'll have to add _GNU_SOURCE to
-	 * your CPPFLAGS. */
-	if (getline(&fbuf, &fbuf_len, stream) == -1) {
-		*len = 0;
-		return NULL;
-	}
-	*len = strlen(fbuf);
-	return fbuf;
-#else
-	size_t pos, nlen;
-	int c;
-	char *nbuf;
-
-	if (!fbuf) {
-		fbuf_len = BUFSIZ;
-		fbuf = malloc(fbuf_len);
-		if (!fbuf) {
-			*len = 0;
-			return NULL;
-		}
-	}
-
-	pos = 0;
-	while ((c = fgetc(stream)) != EOF) {
-		if (pos > fbuf_len) {
-			nlen = fbuf_len + BUFSIZ;
-			nbuf = realloc(fbuf, nlen);
-			if (!nbuf) {
-				free(fbuf);
-				fbuf = NULL;
-				*len = 0;
-				return NULL;
-			}
-			fbuf = nbuf;
-			fbuf_len = nlen;
-		}
-		fbuf[pos++] = c;
-		if (c == '\n')
-			break;
-	}
-	*len = pos;
-	return pos == 0 ? NULL : fbuf;
-#endif
-}
-#endif
-
 /* Like ether_aton, but works with longer addresses */
 static size_t
 hwaddr_aton(unsigned char *buffer, const char *addr)
@@ -234,8 +176,9 @@ load_config(void)
 {
 	struct stat st;
 	FILE *f;
-	char *buf, *cmd, *match, *hwaddr, *p, *e, *r, act;
-	size_t buf_len, len;
+	char *buf, *cmd, *match, *hwaddr, *bp, *p, *e, *r, act;
+	size_t buf_len;
+	ssize_t len;
 	struct pent *pp;
 	long cidr;
 	int in_interface;
@@ -258,15 +201,20 @@ load_config(void)
 	f = fopen(cffile, "r");
 	if (f == NULL)
 		return -1;
+
 	config_mtime = st.st_mtime;
 	ifp = NULL;
 	in_interface = 0;
-	while ((buf = fgetln(f, &buf_len))) {
-		e = buf + buf_len;
-		cmd = get_word(&buf, e);
+	buf = NULL;
+	buf_len = 0;
+
+	while ((len = getline(&buf, &buf_len, f)) != -1) {
+		bp = buf;
+		e = buf + len;
+		cmd = get_word(&bp, e);
 		if (!cmd || *cmd == '\n' || *cmd == '#' || *cmd == ';')
 			continue;
-		match = get_word(&buf, e);
+		match = get_word(&bp, e);
 		if (strcmp(cmd, "proxy") == 0)
 			act = PARPD_PROXY;
 		else if (strcmp(cmd, "half") == 0 ||
@@ -289,7 +237,7 @@ load_config(void)
 		}
 		if (in_interface && ifp == NULL)
 			continue;
-		hwaddr = get_word(&buf, e);
+		hwaddr = get_word(&bp, e);
 		if (!match) {
 			syslog(LOG_DEBUG, "no ip/cidr given");
 			continue;

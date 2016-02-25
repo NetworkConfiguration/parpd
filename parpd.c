@@ -1,6 +1,6 @@
 /*
  * parpd - Proxy ARP Daemon
- * Copyright (c) 2008-2014 Roy Marples <roy@marples.name>
+ * Copyright (c) 2008-2016 Roy Marples <roy@marples.name>
  * All rights reserved
 
  * Redistribution and use in source and binary forms, with or without
@@ -25,7 +25,7 @@
  * SUCH DAMAGE.
  */
 
-const char copyright[] = "Copyright (c) 2008-2014 Roy Marples";
+const char copyright[] = "Copyright (c) 2008-2016 Roy Marples";
 
 #include <sys/ioctl.h>
 #include <sys/param.h>
@@ -557,7 +557,7 @@ discover_interfaces(int argc, char * const *argv)
 
 		ifp = calloc(1, sizeof(*ifp));
 		if (ifp == NULL) {
-			syslog(LOG_ERR, "malloc: %m");
+			syslog(LOG_ERR, "calloc: %m");
 			break;
 		}
 		strlcpy(ifp->ifname, ifa->ifa_name, sizeof(ifp->ifname));
@@ -683,7 +683,7 @@ main(int argc, char **argv)
 	nfds = 0;
 	for (ifp = ifaces; ifp; ifp = ifp->next)
 		nfds++;
-	fds = malloc(sizeof(*fds) * nfds);
+	fds = calloc(nfds, sizeof(*fds));
 	if (fds == NULL) {
 		syslog(LOG_ERR, "malloc: %m");
 		exit(EXIT_FAILURE);

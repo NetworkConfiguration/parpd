@@ -27,6 +27,8 @@
 
 const char copyright[] = "Copyright (c) 2008-2016 Roy Marples";
 
+#define _GNU_SOURCE /* FreeBSD getline(3) and glibc hcreate_r(3) */
+
 #include <sys/ioctl.h>
 #include <sys/param.h>
 #include <sys/socket.h>
@@ -51,7 +53,7 @@ const char copyright[] = "Copyright (c) 2008-2016 Roy Marples";
 #include <fcntl.h>
 #include <getopt.h>
 #include <ifaddrs.h>
-#include <poll.h>
+#include <search.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -59,10 +61,13 @@ const char copyright[] = "Copyright (c) 2008-2016 Roy Marples";
 #include <unistd.h>
 
 #include "parpd.h"
+#include "eloop.h"
 
-static struct interface *ifaces;
 static const char *cffile = PARPD_CONF;
 static time_t config_mtime;
+
+struct interface *ifaces;
+struct hsearch_data *hifaces;
 static struct pent *pents;
 
 static char hwaddr_buffer[(HWADDR_LEN * 3) + 1];
@@ -223,10 +228,16 @@ load_config(void)
 		else if (strcmp(cmd, "ignore") == 0)
 			act = PARPD_IGNORE;
 		else if (strcmp(cmd, "interface") == 0) {
+			ENTRY ent, *entf;
+
 			in_interface = 1;
-			for (ifp = ifaces; ifp; ifp = ifp->next)
-				if (strcmp(ifp->ifname, match) == 0)
-					break;
+			ent.key = match;
+			ent.data = NULL;
+			hsearch_r(ent, FIND, &entf, hifaces);
+			if (entf == NULL)
+				ifp = NULL;
+			else
+				ifp = entf->data;
 			if (ifp == NULL)
 				syslog(LOG_ERR,
 				    "%s: unknown interface", match);
@@ -310,6 +321,7 @@ load_config(void)
 		}
 	}
 	fclose(f);
+	free(buf);
 	return 0;
 }
 
@@ -368,8 +380,9 @@ send_arp(const struct interface *ifp, int op, size_t hlen,
 
 /* Checks an incoming ARP message to see if we should proxy for it. */
 static void
-handle_arp(struct interface *ifp)
+handle_arp(void *arg)
 {
+	struct interface *ifp = arg;
 	uint8_t arp_buffer[ARP_LEN], *shw, *thw;
 	const uint8_t *phw;
 	struct arphdr ar;
@@ -444,13 +457,42 @@ handle_arp(struct interface *ifp)
 	}
 }
 
+static int
+ifa_valid(int s, const struct ifaddrs *ifa)
+{
+	struct ifreq ifr;
+
+#ifdef AF_LINK
+	if (ifa->ifa_addr->sa_family != AF_LINK)
+		return 0;
+#elif AF_PACKET
+	if (ifa->ifa_addr->sa_family != AF_PACKET)
+		return 0;
+#endif
+
+	memset(&ifr, 0, sizeof(ifr));
+	strlcpy(ifr.ifr_name, ifa->ifa_name, sizeof(ifr.ifr_name));
+	if (ioctl(s, SIOCGIFFLAGS, &ifr) == -1) {
+		syslog(LOG_ERR, "%s: SIOGIFFLAGS: %m", ifa->ifa_name);
+		return -1;
+	}
+	if (ifr.ifr_flags & IFF_LOOPBACK ||
+	    ifr.ifr_flags & IFF_POINTOPOINT ||
+	    ifr.ifr_flags & IFF_NOARP)
+		return 0;
+
+	return 1;
+}
+
 static struct interface *
-discover_interfaces(int argc, char * const *argv)
+discover_interfaces(struct eloop *eloop,
+    int argc, char * const *argv, struct hsearch_data **hifs)
 {
 	struct ifaddrs *ifaddrs, *ifa;
-	struct ifreq ifr;
 	int s, i;
-	struct interface *ifp, *ifs;
+	struct interface *ifs, *ifp;
+	ENTRY ent, *entf;
+	size_t nel;
 #ifdef AF_LINK
 	const struct sockaddr_dl *sdl;
 #elif AF_PACKET
@@ -467,15 +509,33 @@ discover_interfaces(int argc, char * const *argv)
 		return NULL;
 	}
 
+	/* Work out size of hash table */
+	if (argc > 0)
+		nel = argc;
+	else {
+		nel = 0;
+		for (ifa = ifaddrs; ifa; ifa = ifa->ifa_next) {
+			if (ifa_valid(s, ifa) == 1)
+				nel++;
+		}
+	}
+
+	if (nel == 0)
+		return NULL;
+
+	if ((*hifs = calloc(1, sizeof(**hifs))) == NULL) {
+		syslog(LOG_ERR, "calloc: %m");
+		return NULL;
+	}
+
+	/* Create the hashtable 25% larger than needed. */
+	hcreate_r(nel + ((nel / 100) * 25), *hifs);
+
 	ifs = NULL;
 	for (ifa = ifaddrs; ifa; ifa = ifa->ifa_next) {
-#ifdef AF_LINK
-		if (ifa->ifa_addr->sa_family != AF_LINK)
+		if (ifa_valid(s, ifa) != 1)
 			continue;
-#elif AF_PACKET
-		if (ifa->ifa_addr->sa_family != AF_PACKET)
-			continue;
-#endif
+
 		if (argc > 0) {
 			for (i = 0; i < argc; i++)
 				if (strcmp(argv[i], ifa->ifa_name) == 0)
@@ -484,31 +544,36 @@ discover_interfaces(int argc, char * const *argv)
 				continue;
 		}
 
-		/* It's possible for an interface to have >1 AF_LINK.
-		 * For our purposes, we use the first one. */
-		for (ifp = ifs; ifp; ifp = ifp->next)
-			if (strcmp(ifp->ifname, ifa->ifa_name) == 0)
-				break;
-		if (ifp)
-			continue;
-
-		memset(&ifr, 0, sizeof(ifr));
-		strlcpy(ifr.ifr_name, ifa->ifa_name, sizeof(ifr.ifr_name));
-		if (ioctl(s, SIOCGIFFLAGS, &ifr) == -1) {
-			syslog(LOG_ERR, "%s: SIOGIFFLAGS: %m", ifa->ifa_name);
-			continue;
-		}
-		if (ifr.ifr_flags & IFF_LOOPBACK ||
-		    ifr.ifr_flags & IFF_POINTOPOINT ||
-		    ifr.ifr_flags & IFF_NOARP)
-			continue;
-
 		ifp = calloc(1, sizeof(*ifp));
 		if (ifp == NULL) {
 			syslog(LOG_ERR, "calloc: %m");
 			break;
 		}
 		strlcpy(ifp->ifname, ifa->ifa_name, sizeof(ifp->ifname));
+
+		/* Open the ARP socket before adding to the hashtable
+		 * because we can't remove it from the hashtable if
+		 * there is an error. */
+		if ((ifp->fd = open_arp(ifp)) == -1) {
+			syslog(LOG_ERR, "%s: open_arp: %m", ifa->ifa_name);
+			free(ifp);
+			continue;
+		}
+
+		ent.key = ifp->ifname;
+		ent.data = ifp;
+		if (hsearch_r(ent, ENTER, &entf, *hifs) == 0) {
+			syslog(LOG_ERR, "hsearch: %m");
+			break;
+		}
+
+		/* Some systems have more than one AF_LINK.
+		 * The first one returned is the active one. */
+		if (entf != NULL && entf->data != ifp) {
+			close(ifp->fd);
+			free(ifp);
+			continue;
+		}
 
 #ifdef AF_LINK
 		sdl = (const struct sockaddr_dl *)(void *)ifa->ifa_addr;
@@ -533,32 +598,59 @@ discover_interfaces(int argc, char * const *argv)
 			memcpy(ifp->hwaddr, sll->sll_addr, ifp->hwlen);
 #endif
 
-		ifp->fd = open_arp(ifp);
-		if (ifp->fd == -1) {
-			syslog(LOG_ERR, "open_arp %s: %m", ifp->ifname);
-			free(ifp);
-		} else {
-			ifp->pents = NULL;
-			ifp->next = ifs;
-			ifs = ifp;
-		}
+		ifp->pents = NULL;
+		ifp->next = ifs;
+		ifs = ifp;
+
+		/* Register with event loop. */
+		eloop_event_add(eloop, ifp->fd, handle_arp, ifp, NULL, NULL);
 	}
 	freeifaddrs(ifaddrs);
 	close(s);
 	return ifs;
 }
 
+const int parpd_signals[] = {
+	SIGTERM,
+	SIGINT
+};
+const size_t parpd_signals_len =
+    sizeof(parpd_signals) / sizeof(parpd_signals[0]);
+
+static void
+parpd_signal_cb(int sig, void *arg)
+{
+
+	syslog(LOG_ERR, "received SIG%s(%d)",
+	    sig == SIGTERM ? "TERM" : sig == SIGINT ? "INT" : "UNKNOWN",
+	    sig);
+	eloop_exit(arg, sig == SIGTERM ? EXIT_SUCCESS : EXIT_FAILURE);
+}
+
 int
 main(int argc, char **argv)
 {
-	struct interface *ifp, *ifl, *ifn;
-	int opt, fflag = 0;
-	nfds_t nfds = 0, nfdsi;
-	int i;
-	struct pollfd *fds;
+	struct interface *ifp, *pifp;
+	int opt, fflag = 0, i;
+	struct eloop *eloop;
+	sigset_t sigset;
 
 	openlog("parpd", LOG_PERROR, LOG_DAEMON);
 	setlogmask(LOG_UPTO(LOG_NOTICE));
+
+	if ((eloop = eloop_new()) == NULL) {
+		syslog(LOG_ERR, "eloop_new: %m");
+		exit(EXIT_FAILURE);
+	}
+	if (eloop_signal_set_cb(eloop,
+	    parpd_signals, parpd_signals_len, parpd_signal_cb, eloop) == -1) {
+		syslog(LOG_ERR, "eloop_new: %m");
+		exit(EXIT_FAILURE);
+	}
+	if (eloop_signal_mask(eloop, &sigset) == -1) {
+		syslog(LOG_ERR, "eloop_signal_mask: %m");
+		exit(EXIT_FAILURE);
+	}
 
 	while ((opt = getopt(argc, argv, "c:dfl")) != -1)
 	{
@@ -583,12 +675,14 @@ main(int argc, char **argv)
 	argc -= optind;
 	argv += optind;
 
-	ifaces = discover_interfaces(argc, argv);
+	ifaces = discover_interfaces(eloop, argc, argv, &hifaces);
 	for (i = 0; i < argc; i++) {
-		for (ifp = ifaces; ifp; ifp = ifp->next)
-			if (strcmp(ifp->ifname, argv[i]) == 0)
-				break;
-		if (ifp == NULL) {
+		ENTRY ent, *entf;
+
+		ent.key = argv[i];
+		ent.data = NULL;
+		hsearch_r(ent, FIND, &entf, hifaces);
+		if (entf == NULL || entf->data == NULL) {
 			syslog(LOG_ERR, "%s: no such interface", argv[i]);
 			exit(EXIT_FAILURE);
 		}
@@ -602,25 +696,16 @@ main(int argc, char **argv)
 		syslog(LOG_ERR, "%s: %m", cffile);
 		exit(EXIT_FAILURE);
 	}
-	if (pents == NULL) {
-		/* No global entries, so remove interfaces without any
-		 * either as they'll do nothing. */
-		ifl = NULL;
-		for (ifp = ifaces; ifp && (ifn = ifp->next, 1); ifp = ifn) {
-			if (ifp->pents != NULL) {
-				ifl = ifp;
-				continue;
-			}
-			if (ifl == NULL)
-				ifaces = ifp->next;
-			else
-				ifl->next = ifp->next;
-			free(ifp);
-		}
-		if (ifaces == NULL) {
-			syslog(LOG_ERR, "%s: no valid entries", cffile);
-			exit(EXIT_FAILURE);
-		}
+	pifp = NULL;
+	for (ifp = ifaces; ifp; ifp = ifp->next) {
+		if (ifp->pents != NULL)
+			pifp = ifp;
+		if (pifp != NULL || pents != NULL)
+			syslog(LOG_DEBUG, "proxying on %s", ifp->ifname);
+	}
+	if (pifp == NULL && pents == NULL) {
+		syslog(LOG_ERR, "%s: no valid entries", cffile);
+		exit(EXIT_FAILURE);
 	}
 
 	if (!fflag && daemon(0, 0) == -1) {
@@ -628,41 +713,18 @@ main(int argc, char **argv)
 		exit(EXIT_FAILURE);
 	}
 
-	nfds = 0;
-	for (ifp = ifaces; ifp; ifp = ifp->next)
-		nfds++;
-	fds = calloc(nfds, sizeof(*fds));
-	if (fds == NULL) {
-		syslog(LOG_ERR, "malloc: %m");
-		exit(EXIT_FAILURE);
-	}
-	i = 0;
-	for (ifp = ifaces; ifp; ifp = ifp->next) {
-		syslog(LOG_DEBUG, "proxying on %s", ifp->ifname);
-		fds[i].fd = ifp->fd;
-		fds[i].events = POLLIN;
-		fds[i].revents = 0;
-		i++;
+	opt = eloop_start(eloop, &sigset);
+
+	hdestroy_r(hifaces);
+	free(hifaces);
+	free_pents(pents);
+	while (ifaces != NULL) {
+		ifp = ifaces;
+		ifaces = ifp->next;
+		free_pents(ifp->pents);
+		free(ifp);
 	}
 
-	for (;;) {
-		i = poll(fds, nfds, -1);
-		if (i == -1) {
-			if (errno == EAGAIN || errno == EINTR)
-				continue;
-			syslog(LOG_ERR, "poll: %m");
-			exit(EXIT_FAILURE);
-		}
-		if (i == 0)
-			continue; /* should never happen */
-		for (nfdsi = 0; nfdsi < nfds; nfdsi++) {
-			if (!(fds[nfdsi].revents & (POLLIN | POLLHUP)))
-				continue;
-			for (ifp = ifaces; ifp; ifp = ifp->next)
-				if (fds[nfdsi].fd == ifp->fd)
-					handle_arp(ifp);
-		}
-	}
-	/* NOTREACHED */
-	return 0;
+	eloop_free(eloop);
+	return opt;
 }

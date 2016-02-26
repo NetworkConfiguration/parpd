@@ -1,6 +1,6 @@
 /* 
  * parpd - Proxy ARP Daemon
- * Copyright (c) 2008-2009 Roy Marples <roy@marples.name>
+ * Copyright (c) 2008-2016 Roy Marples <roy@marples.name>
  * All rights reserved
 
  * Redistribution and use in source and binary forms, with or without
@@ -43,16 +43,17 @@
 #define PARPD_HALFPROXY		2
 
 struct pent {
+	struct pent *next;
 	char action;
 	in_addr_t ip;
 	in_addr_t net;
 	uint8_t hwaddr[HWADDR_LEN];
 	size_t hwlen;
-	struct pent *next;
 };
 
 struct interface
 {
+	struct interface *next;
 	char ifname[IF_NAMESIZE];
 	int family;
 	unsigned char hwaddr[HWADDR_LEN];
@@ -61,7 +62,6 @@ struct interface
 	size_t buffer_size, buffer_len, buffer_pos;
 	unsigned char *buffer;
 	struct pent *pents;
-	struct interface *next;
 };
 
 int open_arp(struct interface *);

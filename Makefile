@@ -3,7 +3,7 @@
 # Copyright (c) 2008 Roy Marples <roy@marples.name>
 
 PROG=		parpd
-SRCS=		parpd.c ${SRC_PF}
+SRCS=		parpd.c eloop.c ${SRC_PF}
 
 BINDIR=		${PREFIX}/sbin
 

@@ -700,7 +700,7 @@ main(int argc, char **argv)
 	for (ifp = ifaces; ifp; ifp = ifp->next) {
 		if (ifp->pents != NULL)
 			pifp = ifp;
-		if (pifp != NULL || pents != NULL)
+		if (ifp->pents != NULL || pents != NULL)
 			syslog(LOG_DEBUG, "proxying on %s", ifp->ifname);
 	}
 	if (pifp == NULL && pents == NULL) {

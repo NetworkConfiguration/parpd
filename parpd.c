@@ -27,10 +27,11 @@
 
 const char copyright[] = "Copyright (c) 2008-2016 Roy Marples";
 
-#define _GNU_SOURCE /* FreeBSD getline(3) and glibc hcreate_r(3) */
+#define _GNU_SOURCE /* FreeBSD getline(3) */
 
 #include <sys/ioctl.h>
 #include <sys/param.h>
+#include <sys/resource.h>
 #include <sys/socket.h>
 #include <sys/stat.h>
 #include <sys/types.h>
@@ -67,8 +68,8 @@ static const char *cffile = PARPD_CONF;
 static time_t config_mtime;
 
 struct interface *ifaces;
-struct hsearch_data *hifaces;
 static struct pent *pents;
+size_t ifaces_max;
 
 static char hwaddr_buffer[(HWADDR_LEN * 3) + 1];
 
@@ -136,16 +137,15 @@ hwaddr_ntoa(const unsigned char *hwaddr, size_t hwlen)
 }
 
 static void
-free_pents(struct pent *pp)
+free_pents(struct pent **pp)
 {
 	struct pent *pn;
 
-	while (pp) {
-		pn = pp->next;
-		free(pp);
-		pp = pn;
+	while (*pp) {
+		pn = (*pp)->next;
+		free(*pp);
+		*pp = pn;
 	}
-	pents = NULL;
 }
 
 /* Because fgetln does not return C strings, we cannot use
@@ -176,6 +176,16 @@ get_word(char **s, const char *e)
 	return w;
 }
 
+static void
+free_config(void)
+{
+	struct interface *ifp;
+
+	free_pents(&pents);
+	for (ifp = ifaces; ifp; ifp = ifp->next)
+		free_pents(&ifp->pents);
+}
+
 static int
 load_config(void)
 {
@@ -192,17 +202,13 @@ load_config(void)
 	struct interface *ifp;
 
 	if (stat(cffile, &st) == -1) {
-		free_pents(pents);
-		for (ifp = ifaces; ifp; ifp = ifp->next)
-			free_pents(ifp->pents);
+		free_config();
 		return -1;
 	}
 	if (config_mtime == st.st_mtime)
 		return 0;
 
-	free_pents(pents);
-	for (ifp = ifaces; ifp; ifp = ifp->next)
-		free_pents(ifp->pents);
+	free_config();
 	f = fopen(cffile, "r");
 	if (f == NULL)
 		return -1;
@@ -233,7 +239,7 @@ load_config(void)
 			in_interface = 1;
 			ent.key = match;
 			ent.data = NULL;
-			hsearch_r(ent, FIND, &entf, hifaces);
+			entf = hsearch(ent, FIND);
 			if (entf == NULL)
 				ifp = NULL;
 			else
@@ -303,7 +309,8 @@ load_config(void)
 		pp = malloc(sizeof(*pp));
 		if (!pp) {
 			syslog(LOG_ERR, "memory exhausted");
-			exit(EXIT_FAILURE);
+			eloop_exit(EXIT_FAILURE);
+			return -1;
 		}
 		pp->action = act;
 		pp->ip = ina.s_addr & net;
@@ -485,14 +492,12 @@ ifa_valid(int s, const struct ifaddrs *ifa)
 }
 
 static struct interface *
-discover_interfaces(struct eloop *eloop,
-    int argc, char * const *argv, struct hsearch_data **hifs)
+discover_interfaces(struct eloop *eloop, int argc, char * const *argv)
 {
 	struct ifaddrs *ifaddrs, *ifa;
 	int s, i;
 	struct interface *ifs, *ifp;
 	ENTRY ent, *entf;
-	size_t nel;
 #ifdef AF_LINK
 	const struct sockaddr_dl *sdl;
 #elif AF_PACKET
@@ -508,28 +513,6 @@ discover_interfaces(struct eloop *eloop,
 		close(s);
 		return NULL;
 	}
-
-	/* Work out size of hash table */
-	if (argc > 0)
-		nel = argc;
-	else {
-		nel = 0;
-		for (ifa = ifaddrs; ifa; ifa = ifa->ifa_next) {
-			if (ifa_valid(s, ifa) == 1)
-				nel++;
-		}
-	}
-
-	if (nel == 0)
-		return NULL;
-
-	if ((*hifs = calloc(1, sizeof(**hifs))) == NULL) {
-		syslog(LOG_ERR, "calloc: %m");
-		return NULL;
-	}
-
-	/* Create the hashtable 25% larger than needed. */
-	hcreate_r(nel + ((nel / 100) * 25), *hifs);
 
 	ifs = NULL;
 	for (ifa = ifaddrs; ifa; ifa = ifa->ifa_next) {
@@ -562,9 +545,12 @@ discover_interfaces(struct eloop *eloop,
 
 		ent.key = ifp->ifname;
 		ent.data = ifp;
-		if (hsearch_r(ent, ENTER, &entf, *hifs) == 0) {
+		entf = hsearch(ent, ENTER);
+		if (entf == NULL) {
 			syslog(LOG_ERR, "hsearch: %m");
-			break;
+			close(ifp->fd);
+			free(ifp);
+			continue;
 		}
 
 		/* Some systems have more than one AF_LINK.
@@ -631,25 +617,27 @@ int
 main(int argc, char **argv)
 {
 	struct interface *ifp, *pifp;
-	int opt, fflag = 0, i;
+	int opt, fflag = 0, i, hcreated = 0;
 	struct eloop *eloop;
 	sigset_t sigset;
+	struct rlimit rlim_fd;
 
+	opt = EXIT_FAILURE;
 	openlog("parpd", LOG_PERROR, LOG_DAEMON);
 	setlogmask(LOG_UPTO(LOG_NOTICE));
 
 	if ((eloop = eloop_new()) == NULL) {
 		syslog(LOG_ERR, "eloop_new: %m");
-		exit(EXIT_FAILURE);
+		goto out;
 	}
 	if (eloop_signal_set_cb(eloop,
 	    parpd_signals, parpd_signals_len, parpd_signal_cb, eloop) == -1) {
-		syslog(LOG_ERR, "eloop_new: %m");
-		exit(EXIT_FAILURE);
+		syslog(LOG_ERR, "eloop_signal_set_cb: %m");
+		goto out;
 	}
 	if (eloop_signal_mask(eloop, &sigset) == -1) {
 		syslog(LOG_ERR, "eloop_signal_mask: %m");
-		exit(EXIT_FAILURE);
+		goto out;
 	}
 
 	while ((opt = getopt(argc, argv, "c:dfl")) != -1)
@@ -675,26 +663,41 @@ main(int argc, char **argv)
 	argc -= optind;
 	argv += optind;
 
-	ifaces = discover_interfaces(eloop, argc, argv, &hifaces);
+	opt = EXIT_FAILURE;
+
+	if (getrlimit(RLIMIT_NOFILE, &rlim_fd) == -1) {
+		syslog(LOG_ERR, "getrlimit: %m");
+		goto out;
+	}
+	/* Add 25% to the limit as recommended by hcreate(3) on Linux. */
+	ifaces_max = rlim_fd.rlim_cur + ((double)rlim_fd.rlim_cur * 0.25);
+	syslog(LOG_DEBUG, "creating hashtable of %zu interfaces", ifaces_max);
+	if (hcreate(ifaces_max) == 0) {
+		syslog(LOG_ERR, "hcreate: %m");
+		goto out;
+	}
+
+	hcreated = 1;
+	ifaces = discover_interfaces(eloop, argc, argv);
 	for (i = 0; i < argc; i++) {
 		ENTRY ent, *entf;
 
 		ent.key = argv[i];
 		ent.data = NULL;
-		hsearch_r(ent, FIND, &entf, hifaces);
+		entf = hsearch(ent, FIND);
 		if (entf == NULL || entf->data == NULL) {
 			syslog(LOG_ERR, "%s: no such interface", argv[i]);
-			exit(EXIT_FAILURE);
+			goto out;
 		}
 	}
 	if (ifaces == NULL) {
 		syslog(LOG_ERR, "no suitable interfaces found");
-		exit(EXIT_FAILURE);
+		goto out;
 	}
 
 	if (load_config() == -1) {
 		syslog(LOG_ERR, "%s: %m", cffile);
-		exit(EXIT_FAILURE);
+		goto out;
 	}
 	pifp = NULL;
 	for (ifp = ifaces; ifp; ifp = ifp->next) {
@@ -705,23 +708,24 @@ main(int argc, char **argv)
 	}
 	if (pifp == NULL && pents == NULL) {
 		syslog(LOG_ERR, "%s: no valid entries", cffile);
-		exit(EXIT_FAILURE);
+		goto out;
 	}
 
 	if (!fflag && daemon(0, 0) == -1) {
 		syslog(LOG_ERR, "daemon: %m");
-		exit(EXIT_FAILURE);
+		goto out;
 	}
 
 	opt = eloop_start(eloop, &sigset);
 
-	hdestroy_r(hifaces);
-	free(hifaces);
-	free_pents(pents);
+out:
+	if (hcreated)
+		hdestroy();
+	free_pents(&pents);
 	while (ifaces != NULL) {
 		ifp = ifaces;
 		ifaces = ifp->next;
-		free_pents(ifp->pents);
+		free_pents(&ifp->pents);
 		free(ifp);
 	}
 

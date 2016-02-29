@@ -308,8 +308,7 @@ load_config(void)
 		/* OK, good to add now. */
 		pp = malloc(sizeof(*pp));
 		if (!pp) {
-			syslog(LOG_ERR, "memory exhausted");
-			eloop_exit(EXIT_FAILURE);
+			free_config();
 			return -1;
 		}
 		pp->action = act;

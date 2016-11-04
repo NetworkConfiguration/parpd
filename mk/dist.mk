@@ -11,6 +11,10 @@ GITREF?=	HEAD
 DISTPREFIX?=	${PKG}
 DISTFILEGZ?=	${DISTPREFIX}.tar.gz
 DISTFILE?=	${DISTPREFIX}.tar.bz2
+DISTINFO=	${DISTFILE}.distinfo
+DISTINFOSIGN=	${DISTINFO}.asc
+CKSUM?=		cksum -a SHA256
+PGP?=		netpgp
 
 CLEANFILES+=	*.tar.bz2
 
@@ -44,6 +48,13 @@ dist-inst:
 	rm -rf /tmp/${DISTPREFIX}
 
 dist: ${DIST}
+
+distinfo: dist
+	${CKSUM} ${DISTFILE} >${DISTINFO}
+	#printf "SIZE (${DISTFILE}) = %s\n" $$(wc -c <${DISTFILE}) >>${DISTINFO}
+	${PGP} --sign --detach --armor --output=${DISTINFOSIGN} ${DISTINFO}
+	chmod 644 ${DISTINFOSIGN}
+	ls -l ${DISTFILE} ${DISTINFO} ${DISTINFOSIGN}
 
 snapshot:
 	mkdir /tmp/${SNAPDIR}

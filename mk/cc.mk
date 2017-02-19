@@ -1,7 +1,7 @@
 # Copyright 2008 Roy Marples <roy@marples.name>
 
 # Setup some good default CFLAGS
-CFLAGS?=	-Os
+CFLAGS?=	-O2
 
 # Try and use some good cc flags if we're building from git
 # We don't use -pedantic as it will warn about our perfectly valid

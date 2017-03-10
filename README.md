@@ -1,7 +1,9 @@
 # parpd
 
-parpd is a Proxy ARP Daemon and complies with [RFC 1027][RFC1027].
-parpd is released under the [2 clause BSD license][BSD2].
+parpd is a Proxy ARP Daemon and complies with
+[RFC 1027](http://tools.ietf.org/html/rfc1027).
+parpd is released under the
+[2 clause BSD license](http://www.freebsd.org/copyright/freebsd-license.html).
 
 ## Installing parpd
 
@@ -14,7 +16,7 @@ cd parpd-1.5
 make install
 ```
 
-### Configuring
+## Configuring
 
 Configuration is found in the file `/etc/parpd.conf`  
 Comment lines should start with `#` or `;`  
@@ -45,6 +47,3 @@ ignore 192.168.0.8
 proxy 0.0.0.0
 ignore 10.0.0.0/24
 ```
-
-[rfc1027]: http://tools.ietf.org/html/rfc1027
-[BSD2]: http://www.freebsd.org/copyright/freebsd-license.html

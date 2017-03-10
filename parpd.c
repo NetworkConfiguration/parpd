@@ -1,6 +1,6 @@
 /*
  * parpd - Proxy ARP Daemon
- * Copyright (c) 2008-2016 Roy Marples <roy@marples.name>
+ * Copyright (c) 2008-2017 Roy Marples <roy@marples.name>
  * All rights reserved
 
  * Redistribution and use in source and binary forms, with or without
@@ -25,7 +25,7 @@
  * SUCH DAMAGE.
  */
 
-const char copyright[] = "Copyright (c) 2008-2016 Roy Marples";
+const char copyright[] = "Copyright (c) 2008-2017 Roy Marples";
 
 #define _GNU_SOURCE /* FreeBSD getline(3) */
 

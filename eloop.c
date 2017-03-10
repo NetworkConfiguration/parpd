@@ -1,6 +1,6 @@
 /*
  * eloop - portable event based main loop.
- * Copyright (c) 2006-2016 Roy Marples <roy@marples.name>
+ * Copyright (c) 2006-2017 Roy Marples <roy@marples.name>
  * All rights reserved.
 
  * Redistribution and use in source and binary forms, with or without
@@ -181,10 +181,11 @@ struct eloop {
 	int exitcode;
 };
 
+#ifdef HAVE_REALLOCARRAY
+#define	eloop_realloca	reallocarray
+#else
 /* Handy routing to check for potential overflow.
- * reallocarray(3) and reallocarr(3) are not portable and this
- * implementation is smaller than using either in libc in
- * the final binary size. */
+ * reallocarray(3) and reallocarr(3) are not portable. */
 #define SQRT_SIZE_MAX (((size_t)1) << (sizeof(size_t) * CHAR_BIT / 2))
 static void *
 eloop_realloca(void *ptr, size_t n, size_t size)
@@ -196,6 +197,7 @@ eloop_realloca(void *ptr, size_t n, size_t size)
 	}
 	return realloc(ptr, n * size);
 }
+#endif
 
 #ifdef HAVE_POLL
 static void
@@ -261,7 +263,7 @@ eloop_pollts(struct pollfd * fds, nfds_t nfds,
 #endif /* HAVE_POLL */
 
 int
-eloop_event_add(struct eloop *eloop, int fd,
+eloop_event_add_rw(struct eloop *eloop, int fd,
     void (*read_cb)(void *), void *read_cb_arg,
     void (*write_cb)(void *), void *write_cb_arg)
 {
@@ -397,6 +399,22 @@ err:
 		TAILQ_INSERT_TAIL(&eloop->free_events, e, next);
 	}
 	return -1;
+}
+
+int
+eloop_event_add(struct eloop *eloop, int fd,
+    void (*read_cb)(void *), void *read_cb_arg)
+{
+
+	return eloop_event_add_rw(eloop, fd, read_cb, read_cb_arg, NULL, NULL);
+}
+
+int
+eloop_event_add_w(struct eloop *eloop, int fd,
+    void (*write_cb)(void *), void *write_cb_arg)
+{
+
+	return eloop_event_add_rw(eloop, fd, NULL,NULL, write_cb, write_cb_arg);
 }
 
 void
@@ -595,12 +613,13 @@ eloop_open(struct eloop *eloop)
 	{
 		close(eloop->poll_fd);
 		eloop->poll_fd = -1;
-		return -1;
 	}
 
 	return eloop->poll_fd;
 #elif defined (HAVE_EPOLL)
 	return (eloop->poll_fd = epoll_create1(EPOLL_CLOEXEC));
+#else
+	return (eloop->poll_fd = -1);
 #endif
 }
 #endif
@@ -725,20 +744,20 @@ int
 eloop_signal_mask(struct eloop *eloop, sigset_t *oldset)
 {
 	sigset_t newset;
-#ifndef HAVE_KQUEUE
 	size_t i;
+#ifndef HAVE_KQUEUE
 	struct sigaction sa;
 #endif
 
 	assert(eloop != NULL);
 
-	sigfillset(&newset);
+	sigemptyset(&newset);
+	for (i = 0; i < eloop->signals_len; i++)
+		sigaddset(&newset, eloop->signals[i]);
 	if (sigprocmask(SIG_SETMASK, &newset, oldset) == -1)
 		return -1;
 
-#ifdef HAVE_KQUEUE
-	UNUSED(eloop);
-#else
+#ifndef HAVE_KQUEUE
 	memset(&sa, 0, sizeof(sa));
 	sa.sa_sigaction = eloop_signal3;
 	sa.sa_flags = SA_SIGINFO;
@@ -771,7 +790,6 @@ eloop_new(void)
 		TAILQ_INIT(&eloop->free_timeouts);
 		eloop->exitcode = EXIT_FAILURE;
 #if defined(HAVE_KQUEUE) || defined(HAVE_EPOLL)
-		eloop->poll_fd = -1;
 		if (eloop_open(eloop) == -1) {
 			eloop_free(eloop);
 			return NULL;

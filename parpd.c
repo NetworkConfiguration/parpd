@@ -1,5 +1,5 @@
 /*
- * parpd - Proxy ARP Daemon
+ * parpd: Proxy ARP Daemon
  * Copyright (c) 2008-2017 Roy Marples <roy@marples.name>
  * All rights reserved
 
@@ -588,7 +588,7 @@ discover_interfaces(struct eloop *eloop, int argc, char * const *argv)
 		ifs = ifp;
 
 		/* Register with event loop. */
-		eloop_event_add(eloop, ifp->fd, handle_arp, ifp, NULL, NULL);
+		eloop_event_add(eloop, ifp->fd, handle_arp, ifp);
 	}
 	freeifaddrs(ifaddrs);
 	close(s);

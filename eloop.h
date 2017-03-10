@@ -1,6 +1,6 @@
 /*
  * dhcpcd - DHCP client daemon
- * Copyright (c) 2006-2016 Roy Marples <roy@marples.name>
+ * Copyright (c) 2006-2017 Roy Marples <roy@marples.name>
  * All rights reserved
 
  * Redistribution and use in source and binary forms, with or without
@@ -69,8 +69,12 @@
 /* Forward declare eloop - the content should be invisible to the outside */
 struct eloop;
 
-int eloop_event_add(struct eloop *, int,
+int eloop_event_add_rw(struct eloop *, int,
     void (*)(void *), void *,
+    void (*)(void *), void *);
+int eloop_event_add(struct eloop *, int,
+    void (*)(void *), void *);
+int eloop_event_add_w(struct eloop *, int,
     void (*)(void *), void *);
 #define eloop_event_delete(eloop, fd) \
     eloop_event_delete_write((eloop), (fd), 0)

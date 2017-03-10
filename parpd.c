@@ -284,7 +284,7 @@ load_config(void)
 				}
 			}
 		}
-		if (inet_aton(match, &ina) == 0) {
+		if (inet_pton(AF_INET, match, &ina) <= 0) {
 			syslog(LOG_DEBUG, "%s: invalid inet addr", match);
 			continue;
 		}

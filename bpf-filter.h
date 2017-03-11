@@ -63,9 +63,6 @@ static const struct bpf_insn arp_bpf_filter [] = {
 	/* Make sure this is an ARP REQUEST. */
 	BPF_STMT(BPF_LD + BPF_H + BPF_IND, offsetof(struct arphdr, ar_op)),
 	BPF_JUMP(BPF_JMP + BPF_JEQ + BPF_K, ARPOP_REQUEST, 2, 0),
-	/* or ARP REPLY. */
-	BPF_JUMP(BPF_JMP + BPF_JEQ + BPF_K, ARPOP_REPLY, 1, 1),
-	BPF_STMT(BPF_RET + BPF_K, 0),
 
 	/* Make sure the protocol length matches. */
 	BPF_STMT(BPF_LD + BPF_B + BPF_IND, offsetof(struct arphdr, ar_pln)),

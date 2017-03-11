@@ -51,7 +51,10 @@ distinfo: dist
 	chmod 644 ${DISTINFOSIGN}
 	ls -l ${DISTFILE} ${DISTINFO} ${DISTINFOSIGN}
 
-snapshot:
+distclean: clean
+	rm -f *.bz2 *.xz *.distinfo *.asc
+
+snapshot: distclean
 	mkdir /tmp/${SNAPDIR}
 	cp -RPp * /tmp/${SNAPDIR}
 	(cd /tmp/${SNAPDIR}; make clean)

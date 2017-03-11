@@ -10,7 +10,7 @@ FOSSILID?=	current
 GITREF?=	HEAD
 DISTPREFIX?=	${PKG}
 DISTFILEGZ?=	${DISTPREFIX}.tar.gz
-DISTFILE?=	${DISTPREFIX}.tar.bz2
+DISTFILE?=	${DISTPREFIX}.tar.xz
 DISTINFO=	${DISTFILE}.distinfo
 DISTINFOSIGN=	${DISTINFO}.asc
 CKSUM?=		cksum -a SHA256
@@ -20,25 +20,19 @@ CLEANFILES+=	*.tar.bz2
 
 SNAP!=		date -u +%Y%m%d%H%M
 SNAPDIR=	${DISTPREFIX}-${SNAP}
-SNAPFILE=	${SNAPDIR}.tar.bz2
+SNAPFILE=	${SNAPDIR}.tar.xz
 
 DIST!=		if test -f .fslckout; then echo "dist-fossil"; \
 		elif test -d .git; then echo "dist-git"; \
-		elif test -d .svn; then echo "dist-svn"; \
 		else echo "dist-inst"; fi
 
 dist-fossil:
 	fossil tarball --name ${DISTPREFIX} ${FOSSILID} ${DISTFILEGZ}
-	gunzip -c ${DISTFILEGZ} |  bzip2 >${DISTFILE}
+	gunzip -c ${DISTFILEGZ} | xz >${DISTFILE}
 	rm ${DISTFILEGZ}
 
 dist-git:
-	git archive --prefix=${DISTPREFIX}/ ${GITREF} | bzip2 >${DISTFILE}
-
-dist-svn:
-	svn export . ${DISTPREFIX}
-	tar cjpf ${DISTFILE} ${DISTPREFIX}
-	rm -rf ${DISTPREFIX}
+	git archive --prefix=${DISTPREFIX}/ ${GITREF} | xz >${DISTFILE}
 
 dist-inst:
 	mkdir /tmp/${DISTPREFIX}

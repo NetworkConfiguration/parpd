@@ -725,6 +725,7 @@ out:
 		ifp = ifaces;
 		ifaces = ifp->next;
 		free_pents(&ifp->pents);
+		free(ifp->buffer);
 		free(ifp);
 	}
 

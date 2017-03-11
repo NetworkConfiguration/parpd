@@ -49,7 +49,7 @@
 #include "bpf-filter.h"
 
 int
-open_arp(struct interface *ifp)
+bpf_open_arp(struct interface *ifp)
 {
 	int fd = -1;
 	struct ifreq ifr;
@@ -123,7 +123,7 @@ eexit:
 }
 
 ssize_t
-send_raw_packet(const struct interface *ifp,
+bpf_write(const struct interface *ifp,
     const uint8_t *hwaddr, size_t hwlen,
     const void *data, size_t len)
 {
@@ -149,7 +149,7 @@ send_raw_packet(const struct interface *ifp,
 /* BPF requires that we read the entire buffer.
  * So we pass the buffer in the API so we can loop on >1 packet. */
 ssize_t
-get_raw_packet(struct interface *ifp, void *data, size_t len)
+bpf_read(struct interface *ifp, void *data, size_t len)
 {
 	struct bpf_hdr packet;
 	ssize_t bytes;

@@ -64,10 +64,10 @@ struct interface
 	struct pent *pents;
 };
 
-int open_arp(struct interface *);
-ssize_t send_raw_packet(const struct interface *,
+int bpf_open_arp(struct interface *);
+ssize_t bpf_write(const struct interface *,
     const uint8_t *, size_t, const void *, size_t);
-ssize_t get_raw_packet(struct interface *, void *, size_t);
+ssize_t bpf_read(struct interface *, void *, size_t);
 
 #define UNCONST(a)		((void *)(unsigned long)(const void *)(a))
 

@@ -381,7 +381,7 @@ send_arp(const struct interface *ifp, int op, size_t hlen,
 	memcpy(p, &tip, sizeof(tip));
 	p += sizeof(tip);
 	len = (size_t)(p - arp_buffer);
-	return send_raw_packet(ifp, tha, hlen, arp_buffer, len);
+	return bpf_write(ifp, tha, hlen, arp_buffer, len);
 }
 
 /* Checks an incoming ARP message to see if we should proxy for it. */
@@ -399,7 +399,7 @@ handle_arp(void *arg)
 	int action;
 
 	for(;;) {
-		bytes = get_raw_packet(ifp, arp_buffer, sizeof(arp_buffer));
+		bytes = bpf_read(ifp, arp_buffer, sizeof(arp_buffer));
 		if (bytes == 0 || bytes == -1)
 			return;
 		/* We must have a full ARP header */
@@ -542,8 +542,8 @@ discover_interfaces(struct eloop *eloop, int argc, char * const *argv)
 		/* Open the ARP socket before adding to the hashtable
 		 * because we can't remove it from the hashtable if
 		 * there is an error. */
-		if ((ifp->fd = open_arp(ifp)) == -1) {
-			syslog(LOG_ERR, "%s: open_arp: %m", ifa->ifa_name);
+		if ((ifp->fd = bpf_open_arp(ifp)) == -1) {
+			syslog(LOG_ERR, "%s: bpf_open_arp: %m", ifa->ifa_name);
 			free(ifp);
 			continue;
 		}

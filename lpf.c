@@ -1,6 +1,6 @@
 /*
- * parpd - Proxy ARP Daemon
- * Copyright (c) 2008-2014 Roy Marples <roy@marples.name>
+ * parpd: Linux Packet Filter
+ * Copyright (c) 2008-2017 Roy Marples <roy@marples.name>
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -31,6 +31,7 @@
 #include <arpa/inet.h>
 #include <net/if.h>
 #include <net/if_arp.h>
+#include <netinet/if_ether.h>
 #include <netinet/in_systm.h>
 #include <netinet/in.h>
 
@@ -39,12 +40,11 @@
 #include <net/ethernet.h>
 #include <netpacket/packet.h>
 #define bpf_insn sock_filter
-#define BPF_SKIPTYPE
-#define BPF_ETHCOOK		-ETH_HLEN
-#define BPF_WHOLEPACKET	0x0fffffff /* work around buggy LPF filters */
+#define BPF_WHOLEPACKET	0x7fffffff /* work around buggy LPF filters */
 
 #include <errno.h>
 #include <fcntl.h>
+#include <stddef.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -57,20 +57,17 @@ int
 open_arp(struct interface *ifp)
 {
 	int s, flags;
-	struct sockaddr_ll sll;
+	union sockunion {
+		struct sockaddr sa;
+		struct sockaddr_ll sll;
+		struct sockaddr_storage ss;
+	} su;
 	struct sock_fprog pf;
 
-	if ((s = socket(PF_PACKET, SOCK_DGRAM, htons(ETHERTYPE_ARP))) == -1)
+	if ((s = socket(PF_PACKET, SOCK_RAW, htons(ETHERTYPE_ARP))) == -1)
 		return -1;
 
-	memset(&sll, 0, sizeof(sll));
-	sll.sll_family = PF_PACKET;
-	sll.sll_protocol = htons(ETHERTYPE_ARP);
-	if (!(sll.sll_ifindex = if_nametoindex(ifp->ifname))) {
-		errno = ENOENT;
-		goto eexit;
-	}
-	/* Install the DHCP filter */
+	/* Install the ARP filter */
 	memset(&pf, 0, sizeof(pf));
 	pf.filter = UNCONST(arp_bpf_filter);
 	pf.len = arp_bpf_filter_len;
@@ -79,8 +76,25 @@ open_arp(struct interface *ifp)
 	if ((flags = fcntl(s, F_GETFL, 0)) == -1
 	    || fcntl(s, F_SETFL, flags | O_NONBLOCK) == -1)
 		goto eexit;
-	if (bind(s, (struct sockaddr *)&sll, sizeof(sll)) == -1)
+
+	/* Allocate a suitably large buffer for a single packet. */
+	if (ifp->buffer_size < ETH_DATA_LEN) {
+		void *nb;
+
+		if ((nb = realloc(ifp->buffer, ETH_DATA_LEN)) == NULL)
+			goto eexit;
+		ifp->buffer = nb;
+		ifp->buffer_size = ETH_DATA_LEN;
+		ifp->buffer_len = ifp->buffer_pos = 0;
+	}
+
+	memset(&su, 0, sizeof(su));
+	su.sll.sll_family = PF_PACKET;
+	su.sll.sll_protocol = htons(ETH_P_ALL);
+	su.sll.sll_ifindex = if_nametoindex(ifp->ifname);
+	if (bind(s, &su.sa, sizeof(su.sll)) == -1)
 		goto eexit;
+
 	return s;
 
 eexit:
@@ -93,21 +107,23 @@ send_raw_packet(const struct interface *ifp,
     const uint8_t *hwaddr, size_t hwlen,
     const void *data, size_t len)
 {
-	struct sockaddr_ll sll;
+	struct iovec iov[2];
+	struct ether_header eh;
 
-	memset(&sll, 0, sizeof(sll));
-	sll.sll_family = AF_PACKET;
-	sll.sll_protocol = htons(ETHERTYPE_ARP);
-	if (!(sll.sll_ifindex = if_nametoindex(ifp->ifname))) {
-		errno = ENOENT;
+	if (ifp->hwlen != hwlen || hwlen != sizeof(eh.ether_dhost)) {
+		errno = EINVAL;
 		return -1;
 	}
-	sll.sll_hatype = htons(ifp->family);
-	sll.sll_halen = hwlen;
-	memcpy(sll.sll_addr, hwaddr, hwlen);
 
-	return sendto(ifp->fd, data, len, 0,
-	    (struct sockaddr *)&sll, sizeof(sll));
+	memset(&eh, 0, sizeof(eh));
+	memcpy(&eh.ether_dhost, hwaddr, sizeof(eh.ether_dhost));
+	memcpy(&eh.ether_shost, ifp->hwaddr, sizeof(eh.ether_shost));
+	eh.ether_type = htons(ETHERTYPE_ARP);
+	iov[0].iov_base = &eh;
+	iov[0].iov_len = sizeof(eh);
+	iov[1].iov_base = UNCONST(data);
+	iov[1].iov_len = len;
+	return writev(ifp->fd, iov, 2);
 }
 
 ssize_t
@@ -115,8 +131,16 @@ get_raw_packet(struct interface *ifp, void *data, size_t len)
 {
 	ssize_t bytes;
 
-	bytes = read(ifp->fd, data, len);
+	bytes = read(ifp->fd, ifp->buffer, ifp->buffer_size);
 	if (bytes == -1)
 		return errno == EAGAIN ? 0 : -1;
+	if (bytes < ETHER_HDR_LEN) {
+		errno = EINVAL;
+		return -1;
+	}
+	bytes -= ETHER_HDR_LEN;
+	if ((size_t)bytes > len)
+		bytes = len;
+	memcpy(data, ifp->buffer + ETHER_HDR_LEN, bytes);
 	return bytes;
 }

@@ -1,6 +1,6 @@
 /*
- * parpd - Proxy ARP Daemon
- * Copyright (c) 2008-2016 Roy Marples <roy@marples.name>
+ * parpd: Berkley Packet Filter
+ * Copyright (c) 2008-2017 Roy Marples <roy@marples.name>
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -39,6 +39,7 @@
 #include <fcntl.h>
 #include <limits.h>
 #include <paths.h>
+#include <stddef.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -127,13 +128,19 @@ send_raw_packet(const struct interface *ifp,
     const void *data, size_t len)
 {
 	struct iovec iov[2];
-	struct ether_header hw;
+	struct ether_header eh;
 
-	memset(&hw, 0, ETHER_HDR_LEN);
-	memcpy(&hw.ether_dhost, hwaddr, hwlen);
-	hw.ether_type = htons(ETHERTYPE_ARP);
-	iov[0].iov_base = &hw;
-	iov[0].iov_len = ETHER_HDR_LEN;
+	if (ifp->hwlen != hwlen || hwlen != sizeof(eh.ether_dhost)) {
+		errno = EINVAL;
+		return -1;
+	}
+
+	memset(&eh, 0, sizeof(eh));
+	memcpy(&eh.ether_dhost, hwaddr, sizeof(eh.ether_dhost));
+	memcpy(&eh.ether_shost, ifp->hwaddr, sizeof(eh.ether_shost));
+	eh.ether_type = htons(ETHERTYPE_ARP);
+	iov[0].iov_base = &eh;
+	iov[0].iov_len = sizeof(eh);
 	iov[1].iov_base = UNCONST(data);
 	iov[1].iov_len = len;
 	return writev(ifp->fd, iov, 2);

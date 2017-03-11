@@ -406,6 +406,9 @@ handle_arp(void *arg)
 		if ((size_t)bytes < sizeof(ar))
 			continue;
 		memcpy(&ar, arp_buffer, sizeof(ar));
+
+		/* Below checks are now enforced by BPF */
+#if 0
 		/* Protocol must be IP. */
 		if (ar.ar_pro != htons(ETHERTYPE_IP))
 			continue;
@@ -415,6 +418,7 @@ handle_arp(void *arg)
 		 * Should we make REPLY knock out our config entries? */
 		if (ar.ar_op != htons(ARPOP_REQUEST))
 			continue;
+#endif
 
 		/* Get pointers to the hardware addreses */
 		shw = arp_buffer + sizeof(ar);
@@ -446,6 +450,8 @@ handle_arp(void *arg)
 			continue;
 		if (action == PARPD_HALFPROXY && sip == INADDR_ANY)
 			continue;
+		/* If no hardware address specified in config,
+		 * use the interface hardware address */
 		if (hwlen == 0) {
 			phw = ifp->hwaddr;
 			hwlen = ifp->hwlen;

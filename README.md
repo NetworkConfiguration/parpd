@@ -5,17 +5,6 @@ parpd is a Proxy ARP Daemon and complies with
 parpd is released under the
 [2 clause BSD license](http://www.freebsd.org/copyright/freebsd-license.html).
 
-## Installing parpd
-
-Change the version as required.
-
-```
-cd /tmp
-tar xvjpf /path/to/parpd-1.5.tar.bz2
-cd parpd-1.5
-make install
-```
-
 ## Configuring
 
 Configuration is found in the file `/etc/parpd.conf`  

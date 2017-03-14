@@ -1,6 +1,6 @@
 /*
- * dhcpcd - DHCP client daemon
- * Copyright (c) 2006-2014 Roy Marples <roy@marples.name>
+ * parpd: ARP BPF filter
+ * Copyright (c) 2006-2017 Roy Marples <roy@marples.name>
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -29,7 +29,7 @@
 #endif
 
 /* This is hardcoded for ethernet. */
-static const struct bpf_insn arp_bpf_filter [] = {
+static const struct bpf_insn bpf_arp_filter [] = {
 	/* Ensure packet is at least correct size. */
 	BPF_STMT(BPF_LD + BPF_W + BPF_LEN, 0),
 	BPF_JUMP(BPF_JMP + BPF_JGE + BPF_K, sizeof(struct ether_arp), 1, 0),
@@ -72,4 +72,4 @@ static const struct bpf_insn arp_bpf_filter [] = {
 	/* If we passed all the tests, ask for the whole packet. */
 	BPF_STMT(BPF_RET + BPF_K, BPF_WHOLEPACKET),
 };
-#define arp_bpf_filter_len sizeof(arp_bpf_filter) / sizeof(arp_bpf_filter[0])
+#define bpf_arp_filter_len sizeof(bpf_arp_filter) / sizeof(bpf_arp_filter[0])

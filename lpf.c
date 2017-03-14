@@ -69,8 +69,8 @@ bpf_open_arp(struct interface *ifp)
 
 	/* Install the ARP filter */
 	memset(&pf, 0, sizeof(pf));
-	pf.filter = UNCONST(arp_bpf_filter);
-	pf.len = arp_bpf_filter_len;
+	pf.filter = UNCONST(bpf_arp_filter);
+	pf.len = bpf_arp_filter_len;
 	if (setsockopt(s, SOL_SOCKET, SO_ATTACH_FILTER, &pf, sizeof(pf)) != 0)
 		goto eexit;
 	if ((flags = fcntl(s, F_GETFL, 0)) == -1

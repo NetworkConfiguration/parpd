@@ -109,8 +109,8 @@ bpf_open_arp(struct interface *ifp)
 		goto eexit;
 #endif
 
-	pf.bf_insns = UNCONST(arp_bpf_filter);
-	pf.bf_len = arp_bpf_filter_len;
+	pf.bf_insns = UNCONST(bpf_arp_filter);
+	pf.bf_len = bpf_arp_filter_len;
 	if (ioctl(fd, BIOCSETF, &pf) == -1)
 		goto eexit;
 	return fd;

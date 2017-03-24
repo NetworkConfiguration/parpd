@@ -474,6 +474,8 @@ ifa_valid(int s, const struct ifaddrs *ifa)
 {
 	struct ifreq ifr;
 
+	if (ifa->ifa_addr == NULL)
+		return 0;
 #ifdef AF_LINK
 	if (ifa->ifa_addr->sa_family != AF_LINK)
 		return 0;

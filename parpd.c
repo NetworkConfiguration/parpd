@@ -718,9 +718,17 @@ main(int argc, char **argv)
 		goto out;
 	}
 
-	if (!fflag && daemon(0, 0) == -1) {
-		syslog(LOG_ERR, "daemon: %m");
-		goto out;
+	if (!fflag) {
+		if (daemon(0, 0) == -1) {
+			syslog(LOG_ERR, "daemon: %m");
+			goto out;
+		}
+
+		/* At least for kqueue, poll_fd gets invalidated by fork */
+                if (eloop_requeue(eloop) == -1) {
+                        syslog(LOG_ERR, "eloop_requeue after fork: %m");
+                        goto out;
+                }
 	}
 
 	opt = eloop_start(eloop, &sigset);

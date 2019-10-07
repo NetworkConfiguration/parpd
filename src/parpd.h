@@ -31,6 +31,9 @@
 #include <net/if.h>
 
 #include "config.h"
+#ifdef HAVE_SYS_RBTREE_H
+#include <sys/rbtree.h>
+#endif
 
 #define VERSION			"1.99"
 #define PARPD_CONF		SYSCONFDIR "/parpd.conf"
@@ -42,7 +45,7 @@
 #define PARPD_HALFPROXY		2
 
 struct pent {
-	struct pent *next;
+	rb_node_t rbtree;
 	char action;
 	in_addr_t ip;
 	in_addr_t net;
@@ -52,7 +55,7 @@ struct pent {
 
 struct interface
 {
-	struct interface *next;
+	rb_node_t rbtree;
 	char ifname[IF_NAMESIZE];
 	int family;
 	unsigned char hwaddr[HWADDR_LEN];
@@ -60,7 +63,7 @@ struct interface
 	int fd;
 	size_t buffer_size, buffer_len, buffer_pos;
 	unsigned char *buffer;
-	struct pent *pents;
+	rb_tree_t pents;
 };
 
 int bpf_open_arp(struct interface *);

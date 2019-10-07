@@ -27,7 +27,7 @@
 
 const char copyright[] = "Copyright (c) 2008-2017 Roy Marples";
 
-#define _GNU_SOURCE /* FreeBSD getline(3) */
+#include "config.h"
 
 #include <sys/ioctl.h>
 #include <sys/param.h>
@@ -54,7 +54,7 @@ const char copyright[] = "Copyright (c) 2008-2017 Roy Marples";
 #include <fcntl.h>
 #include <getopt.h>
 #include <ifaddrs.h>
-#include <search.h>
+#include <stddef.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -67,15 +67,15 @@ const char copyright[] = "Copyright (c) 2008-2017 Roy Marples";
 static const char *cffile = PARPD_CONF;
 static time_t config_mtime;
 
-struct interface *ifaces;
-static struct pent *pents;
-size_t ifaces_max;
+static rb_tree_t ifaces;
+static rb_tree_t pents;
 
 static char hwaddr_buffer[(HWADDR_LEN * 3) + 1];
 
 static void
 usage(void)
 {
+
 	printf("usage: parpd [-dfl] [-c file] [interface [...]]\n");
 }
 
@@ -136,15 +136,55 @@ hwaddr_ntoa(const unsigned char *hwaddr, size_t hwlen)
 	return hwaddr_buffer;
 }
 
+static int
+if_compare(__unused void *context, const void *node1, const void *node2)
+{
+        const struct interface *if1 = node1, *if2 = node2;
+
+	return strcmp(if1->ifname, if2->ifname);
+}
+
+static const rb_tree_ops_t if_compare_ops = {
+	.rbto_compare_nodes = if_compare,
+	.rbto_compare_key = if_compare,
+	.rbto_node_offset = offsetof(struct interface, rbtree),
+	.rbto_context = NULL
+};
+
+static int
+p_compare(__unused void *context, const void *node1, const void *node2)
+{
+        const struct pent *p1 = node1, *p2 = node2;
+	in_addr_t p2net;
+
+	/* When searching for a node, the node we're finding is based on
+	 * node 2. As far as pard is concerned, we only find an ip address
+	 * so we need to compare it to the network from node 1.
+	 * But we also need to allow node 2 to have a valid configuration
+	 * when we initially load it. */
+	if (p2->net != INADDR_ANY || p2->ip == INADDR_ANY)
+		p2net = p2->net;
+	else
+		p2net = p1->net;
+
+	return (int)((p1->ip & p1->net) - (p2->ip & p2net));
+}
+
+static const rb_tree_ops_t p_compare_ops = {
+	.rbto_compare_nodes = p_compare,
+	.rbto_compare_key = p_compare,
+	.rbto_node_offset = offsetof(struct pent, rbtree),
+	.rbto_context = NULL
+};
+
 static void
-free_pents(struct pent **pp)
+free_pents(rb_tree_t *pp)
 {
 	struct pent *pn;
 
-	while (*pp) {
-		pn = (*pp)->next;
-		free(*pp);
-		*pp = pn;
+	while ((pn = RB_TREE_MIN(pp)) != NULL) {
+		rb_tree_remove_node(pp, pn);
+		free(pn);
 	}
 }
 
@@ -182,7 +222,7 @@ free_config(void)
 	struct interface *ifp;
 
 	free_pents(&pents);
-	for (ifp = ifaces; ifp; ifp = ifp->next)
+	RB_TREE_FOREACH(ifp, &ifaces)
 		free_pents(&ifp->pents);
 }
 
@@ -234,16 +274,10 @@ load_config(void)
 		else if (strcmp(cmd, "ignore") == 0)
 			act = PARPD_IGNORE;
 		else if (strcmp(cmd, "interface") == 0) {
-			ENTRY ent, *entf;
+			struct interface iff = { .fd = -1 };
 
-			in_interface = 1;
-			ent.key = match;
-			ent.data = NULL;
-			entf = hsearch(ent, FIND);
-			if (entf == NULL)
-				ifp = NULL;
-			else
-				ifp = entf->data;
+			strlcpy(iff.ifname, match, sizeof(iff.ifname));
+			ifp = rb_tree_find_node(&ifaces, &iff);
 			if (ifp == NULL)
 				syslog(LOG_ERR,
 				    "%s: unknown interface", match);
@@ -305,9 +339,10 @@ load_config(void)
 				}
 			}
 		}
+
 		/* OK, good to add now. */
 		pp = malloc(sizeof(*pp));
-		if (!pp) {
+		if (pp == NULL) {
 			free_config();
 			return -1;
 		}
@@ -318,13 +353,10 @@ load_config(void)
 			pp->hwlen = 0;
 		else
 			pp->hwlen = hwaddr_aton(pp->hwaddr, hwaddr);
-		if (ifp) {
-			pp->next = ifp->pents;
-			ifp->pents = pp;
-		} else {
-			pp->next = pents;
-			pents = pp;
-		}
+		if (ifp)
+			rb_tree_insert_node(&ifp->pents, pp);
+		else
+			rb_tree_insert_node(&pents, pp);
 	}
 	fclose(f);
 	free(buf);
@@ -332,25 +364,26 @@ load_config(void)
 }
 
 static int
-proxy(const struct pent *ps, in_addr_t ip, const uint8_t **hw, size_t *hwlen)
+proxy(rb_tree_t *ps, in_addr_t ip, const uint8_t **hw, size_t *hwlen)
 {
-	const struct pent *pp;
+	struct pent pf = { .ip = ip }, *pp;
 
 	if (load_config() == -1)
 		return -1;
 
-	for (pp = ps; pp; pp = pp->next) {
-		if (pp->ip == (ip & pp->net) ||
-		    pp->ip == INADDR_ANY)
-		{
-			if (pp->action) {
-				*hw = pp->hwaddr;
-				*hwlen = pp->hwlen;
-			}
-			return pp->action;
-		}
+	pp = rb_tree_find_node(ps, &pf);
+	if (pp == NULL) {
+		pf.ip = INADDR_ANY;
+		pp = rb_tree_find_node(ps, &pf);
+		if (pp == NULL)
+			 return PARPD_IGNORE;
 	}
-	return PARPD_IGNORE;
+
+	if (pp->action) {
+		*hw = pp->hwaddr;
+		*hwlen = pp->hwlen;
+	}
+	return pp->action;
 }
 
 #define ARP_LEN								      \
@@ -436,12 +469,12 @@ handle_arp(void *arg)
 		ina.s_addr = tip;
 		syslog(LOG_DEBUG, "%s: received ARPOP_REQUEST for %s",
 		    ifp->ifname, inet_ntoa(ina));
-		if ((action = proxy(ifp->pents, tip, &phw, &hwlen)) == -1) {
+		if ((action = proxy(&ifp->pents, tip, &phw, &hwlen)) == -1) {
 			syslog(LOG_ERR, "proxy: %m");
 			continue;
 		}
 		if (action == PARPD_IGNORE &&
-		    (action = proxy(pents, tip, &phw, &hwlen)) == -1)
+		    (action = proxy(&pents, tip, &phw, &hwlen)) == -1)
 		{
 			syslog(LOG_ERR, "proxy: %m");
 			continue;
@@ -498,13 +531,12 @@ ifa_valid(int s, const struct ifaddrs *ifa)
 	return 1;
 }
 
-static struct interface *
-discover_interfaces(struct eloop *eloop, int argc, char * const *argv)
+static void
+discover_interfaces(int argc, char * const *argv)
 {
 	struct ifaddrs *ifaddrs, *ifa;
 	int s, i;
 	struct interface *ifs, *ifp;
-	ENTRY ent, *entf;
 #ifdef AF_LINK
 	const struct sockaddr_dl *sdl;
 #elif AF_PACKET
@@ -513,12 +545,12 @@ discover_interfaces(struct eloop *eloop, int argc, char * const *argv)
 
 	if ((s = socket(AF_INET, SOCK_DGRAM, 0)) == -1) {
 		syslog(LOG_ERR, "socket: %m");
-		return NULL;
+		return;
 	}
 	if (getifaddrs(&ifaddrs) == -1) {
 		syslog(LOG_ERR, "getifaddrs: %m");
 		close(s);
-		return NULL;
+		return;
 	}
 
 	ifs = NULL;
@@ -540,33 +572,7 @@ discover_interfaces(struct eloop *eloop, int argc, char * const *argv)
 			break;
 		}
 		strlcpy(ifp->ifname, ifa->ifa_name, sizeof(ifp->ifname));
-
-		/* Open the ARP socket before adding to the hashtable
-		 * because we can't remove it from the hashtable if
-		 * there is an error. */
-		if ((ifp->fd = bpf_open_arp(ifp)) == -1) {
-			syslog(LOG_ERR, "%s: bpf_open_arp: %m", ifa->ifa_name);
-			free(ifp);
-			continue;
-		}
-
-		ent.key = ifp->ifname;
-		ent.data = ifp;
-		entf = hsearch(ent, ENTER);
-		if (entf == NULL) {
-			syslog(LOG_ERR, "hsearch: %m");
-			close(ifp->fd);
-			free(ifp);
-			continue;
-		}
-
-		/* Some systems have more than one AF_LINK.
-		 * The first one returned is the active one. */
-		if (entf != NULL && entf->data != ifp) {
-			close(ifp->fd);
-			free(ifp);
-			continue;
-		}
+		ifp->fd = -1;
 
 #ifdef AF_LINK
 		sdl = (const struct sockaddr_dl *)(void *)ifa->ifa_addr;
@@ -591,16 +597,18 @@ discover_interfaces(struct eloop *eloop, int argc, char * const *argv)
 			memcpy(ifp->hwaddr, sll->sll_addr, ifp->hwlen);
 #endif
 
-		ifp->pents = NULL;
-		ifp->next = ifs;
-		ifs = ifp;
+		rb_tree_init(&ifp->pents, &p_compare_ops);
 
-		/* Register with event loop. */
-		eloop_event_add(eloop, ifp->fd, handle_arp, ifp);
+		/* Some systems have more than one AF_LINK.
+		 * The first one returned is the active one. */
+		ifs = rb_tree_insert_node(&ifaces, ifp);
+		if (ifs != ifp) {
+			free(ifp);
+			continue;
+		}
 	}
 	freeifaddrs(ifaddrs);
 	close(s);
-	return ifs;
 }
 
 const int parpd_signals[] = {
@@ -624,10 +632,10 @@ int
 main(int argc, char **argv)
 {
 	struct interface *ifp, *pifp;
-	int opt, fflag = 0, i, hcreated = 0;
+	int opt, fflag = 0, i;
 	struct eloop *eloop;
 	sigset_t sigset;
-	struct rlimit rlim_fd;
+	bool have_pents = false;
 
 	opt = EXIT_FAILURE;
 	openlog("parpd", LOG_PERROR, LOG_DAEMON);
@@ -672,32 +680,21 @@ main(int argc, char **argv)
 
 	opt = EXIT_FAILURE;
 
-	if (getrlimit(RLIMIT_NOFILE, &rlim_fd) == -1) {
-		syslog(LOG_ERR, "getrlimit: %m");
-		goto out;
-	}
-	/* Add 25% to the limit as recommended by hcreate(3) on Linux. */
-	ifaces_max = rlim_fd.rlim_cur + ((double)rlim_fd.rlim_cur * 0.25);
-	syslog(LOG_DEBUG, "creating hashtable of %zu interfaces", ifaces_max);
-	if (hcreate(ifaces_max) == 0) {
-		syslog(LOG_ERR, "hcreate: %m");
-		goto out;
-	}
+	rb_tree_init(&ifaces, &if_compare_ops);
+	rb_tree_init(&pents, &p_compare_ops);
 
-	hcreated = 1;
-	ifaces = discover_interfaces(eloop, argc, argv);
+	discover_interfaces(argc, argv);
 	for (i = 0; i < argc; i++) {
-		ENTRY ent, *entf;
+		struct interface iff = { .fd = -1 };
 
-		ent.key = argv[i];
-		ent.data = NULL;
-		entf = hsearch(ent, FIND);
-		if (entf == NULL || entf->data == NULL) {
+		strlcpy(iff.ifname, argv[i], sizeof(iff.ifname));
+		ifp = rb_tree_find_node(&ifaces, &iff);
+		if (ifp == NULL) {
 			syslog(LOG_ERR, "%s: no such interface", argv[i]);
 			goto out;
 		}
 	}
-	if (ifaces == NULL) {
+	if (RB_TREE_MIN(&ifaces) == NULL) {
 		syslog(LOG_ERR, "no suitable interfaces found");
 		goto out;
 	}
@@ -706,14 +703,26 @@ main(int argc, char **argv)
 		syslog(LOG_ERR, "%s: %m", cffile);
 		goto out;
 	}
+
+	have_pents = (RB_TREE_MIN(&pents) != NULL);
 	pifp = NULL;
-	for (ifp = ifaces; ifp; ifp = ifp->next) {
-		if (ifp->pents != NULL)
+	RB_TREE_FOREACH(ifp, &ifaces) {
+		bool if_have_pents = (RB_TREE_MIN(&ifp->pents) != NULL);
+
+		if (if_have_pents)
 			pifp = ifp;
-		if (ifp->pents != NULL || pents != NULL)
-			syslog(LOG_DEBUG, "proxying on %s", ifp->ifname);
+		if (!if_have_pents && !have_pents)
+			continue;
+
+		if ((ifp->fd = bpf_open_arp(ifp)) == -1) {
+			syslog(LOG_ERR, "%s: bpf_open_arp: %m", ifp->ifname);
+			continue;
+		}
+
+		syslog(LOG_DEBUG, "proxying on %s", ifp->ifname);
+		eloop_event_add(eloop, ifp->fd, handle_arp, ifp);
 	}
-	if (pifp == NULL && pents == NULL) {
+	if (pifp == NULL && !have_pents) {
 		syslog(LOG_ERR, "%s: no valid entries", cffile);
 		goto out;
 	}
@@ -734,12 +743,9 @@ main(int argc, char **argv)
 	opt = eloop_start(eloop, &sigset);
 
 out:
-	if (hcreated)
-		hdestroy();
 	free_pents(&pents);
-	while (ifaces != NULL) {
-		ifp = ifaces;
-		ifaces = ifp->next;
+	while ((ifp = RB_TREE_MIN(&ifaces)) != NULL) {
+		rb_tree_remove_node(&ifaces, ifp);
 		free_pents(&ifp->pents);
 		free(ifp->buffer);
 		free(ifp);

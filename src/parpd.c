@@ -27,8 +27,6 @@
 
 const char copyright[] = "Copyright (c) 2008-2017 Roy Marples";
 
-#include "config.h"
-
 #include <sys/ioctl.h>
 #include <sys/param.h>
 #include <sys/resource.h>
@@ -61,6 +59,8 @@ const char copyright[] = "Copyright (c) 2008-2017 Roy Marples";
 #include <syslog.h>
 #include <unistd.h>
 
+#include "common.h"
+#include "config.h"
 #include "parpd.h"
 #include "eloop.h"
 

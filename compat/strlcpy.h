@@ -19,6 +19,8 @@
 #ifndef STRLCPY_H
 #define STRLCPY_H
 
+#include <stddef.h>
+
 size_t strlcpy(char *, const char *, size_t);
 
 #endif

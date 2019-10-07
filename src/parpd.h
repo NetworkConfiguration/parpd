@@ -57,7 +57,7 @@ struct interface
 {
 	rb_node_t rbtree;
 	char ifname[IF_NAMESIZE];
-	int family;
+	sa_family_t family;
 	unsigned char hwaddr[HWADDR_LEN];
 	size_t hwlen;
 	int fd;

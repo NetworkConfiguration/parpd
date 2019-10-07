@@ -391,7 +391,7 @@ proxy(rb_tree_t *ps, in_addr_t ip, const uint8_t **hw, size_t *hwlen)
 	(sizeof(struct arphdr) + (2 * sizeof(uint32_t)) + (2 * HWADDR_LEN))
 /* Does what is says on the tin - sends an ARP message */
 static ssize_t
-send_arp(const struct interface *ifp, int op, size_t hlen,
+send_arp(const struct interface *ifp, uint16_t op, size_t hlen,
     const uint8_t *sha, in_addr_t sip, const uint8_t *tha, in_addr_t tip)
 {
 	uint8_t arp_buffer[ARP_LEN];

@@ -1,21 +1,95 @@
-# Makefile based on BSD make.
-# Our mk stubs also work with GNU make.
-# Copyright (c) 2008 Roy Marples <roy@marples.name>
+SUBDIRS=	src
 
-PROG=		parpd
-SRCS=		parpd.c eloop.c ${SRC_PF}
+VERSION!=	sed -n 's/\#define VERSION[[:space:]]*"\(.*\)".*/\1/p' src/parpd.h
 
-BINDIR=		${PREFIX}/sbin
+DIST!=		if test -d .git; then echo "dist-git"; \
+		else echo "dist-inst"; fi
+GITREF?=	HEAD
 
-MAN=		parpd.conf.5 parpd.8
-CLEANFILES=	parpd.8
+DISTSUFFIX=
+DISTPREFIX?=	parpd-${VERSION}${DISTSUFFIX}
+DISTFILEGZ?=	${DISTPREFIX}.tar.gz
+DISTFILE?=	${DISTPREFIX}.tar.xz
+DISTINFO=	${DISTFILE}.distinfo
+DISTINFOSIGN=	${DISTINFO}.asc
 
-CPPFLAGS+=	-DSYSCONFDIR=\"${SYSCONFDIR}\"
-.SUFFIXES:	.in
-.in:
-	${SED} -e 's:@SYSCONFDIR@:${SYSCONFDIR}:g' $< >$@
+CLEANFILES+=	*.tar.xz
 
-MK=		mk
-include ${MK}/sys.mk
-include ${MK}/os.mk
-include ${MK}/prog.mk
+all: config.h
+	for x in ${SUBDIRS}; do cd $$x; ${MAKE} $@ || exit $$?; cd ..; done
+
+depend: config.h
+	for x in ${SUBDIRS}; do cd $$x; ${MAKE} $@ || exit $$?; cd ..; done
+
+eginstall:
+	for x in ${SUBDIRS}; do cd $$x; ${MAKE} $@ || exit $$?; cd ..; done
+
+install:
+	for x in ${SUBDIRS}; do cd $$x; ${MAKE} $@ || exit $$?; cd ..; done
+
+proginstall:
+	for x in ${SUBDIRS}; do cd $$x; ${MAKE} $@ || exit $$?; cd ..; done
+
+clean:
+	rm -rf cov-int parpd.xz
+	for x in ${SUBDIRS}; do cd $$x; ${MAKE} $@ || exit $$?; cd ..; done
+
+distclean: clean
+	rm -f config.h config.mk config.log \
+		${DISTFILE} ${DISTFILEGZ} ${DISTINFO} ${DISTINFOSIGN}
+	rm -f *.diff *.patch *.orig *.rej
+	for x in ${SUBDIRS}; do cd $$x; ${MAKE} $@ || exit $$?; cd ..; done
+
+dist-git:
+	git archive --prefix=${DISTPREFIX}/ ${GITREF} | xz >${DISTFILE}
+
+dist-inst:
+	mkdir /tmp/${DISTPREFIX}
+	cp -RPp * /tmp/${DISTPREFIX}
+	(cd /tmp/${DISTPREFIX}; make clean)
+	tar -cvjpf ${DISTFILE} -C /tmp ${DISTPREFIX}
+	rm -rf /tmp/${DISTPREFIX}
+
+dist: ${DIST}
+
+distinfo: dist
+	rm -f ${DISTINFO} ${DISTINFOSIGN}
+	${CKSUM} ${DISTFILE} >${DISTINFO}
+	#printf "SIZE (${DISTFILE}) = %s\n" $$(wc -c <${DISTFILE}) >>${DISTINFO}
+	${PGP} --clearsign --output=${DISTINFOSIGN} ${DISTINFO}
+	chmod 644 ${DISTINFOSIGN}
+	ls -l ${DISTFILE} ${DISTINFO} ${DISTINFOSIGN}
+
+snapshot:
+	rm -rf /tmp/${DISTPREFIX}
+	${INSTALL} -d /tmp/${DISTPREFIX}
+	cp -RPp * /tmp/${DISTPREFIX}
+	${MAKE} -C /tmp/${DISTPREFIX} distclean
+	tar cf - -C /tmp ${DISTPREFIX} | xz >${DISTFILE}
+	ls -l ${DISTFILE}
+
+_import: dist
+	rm -rf ${DESTDIR}/*
+	${INSTALL} -d ${DESTDIR}
+	tar xvpf ${DISTFILE} -C ${DESTDIR} --strip 1
+	@${ECHO}
+	@${ECHO} "============================================================="
+	@${ECHO} "parpd-${VERSION} imported to ${DESTDIR}"
+
+import:
+	${MAKE} _import DESTDIR=`if [ -n "${DESTDIR}" ]; then echo "${DESTDIR}"; else  echo /tmp/${DISTPREFIX}; fi`
+
+
+_import-src:
+	rm -rf ${DESTDIR}/*
+	${INSTALL} -d ${DESTDIR}
+	cp LICENSE README.md ${DESTDIR};
+	for x in ${SUBDIRS}; do cd $$x; ${MAKE} DESTDIR=${DESTDIR} $@ || exit $$?; cd ..; done
+	@${ECHO}
+	@${ECHO} "============================================================="
+	@${ECHO} "parpd-${VERSION} imported to ${DESTDIR}"
+
+import-src:
+	${MAKE} _import-src DESTDIR=`if [ -n "${DESTDIR}" ]; then echo "${DESTDIR}"; else  echo /tmp/${DISTPREFIX}; fi`
+
+include Makefile.inc

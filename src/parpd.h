@@ -30,10 +30,9 @@
 
 #include <net/if.h>
 
-#define VERSION			"1.7"
-#ifndef SYSCONFDIR
-#  define SYSCONFDIR		"/etc"
-#endif
+#include "config.h"
+
+#define VERSION			"1.99"
 #define PARPD_CONF		SYSCONFDIR "/parpd.conf"
 
 #define HWADDR_LEN		20
@@ -70,13 +69,5 @@ ssize_t bpf_write(const struct interface *,
 ssize_t bpf_read(struct interface *, void *, size_t);
 
 #define UNCONST(a)		((void *)(unsigned long)(const void *)(a))
-
-/* Only GLIBC doesn't support strlcpy */
-#ifdef __GLIBC__
-#  if !defined(__UCLIBC__) && !defined (__dietlibc__)
-#    include <stdio.h>
-#    define strlcpy(dst, src, len) snprintf(dst, len, "%s", src)
-#  endif
-#endif
 
 #endif

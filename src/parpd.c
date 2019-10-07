@@ -326,13 +326,14 @@ load_config(void)
 			if (*hwaddr == '#' || *hwaddr == ';') {
 				hwaddr = NULL;
 			} else {
-				len = hwaddr_aton(NULL, hwaddr);
-				if (len == 0) {
+				size_t hlen = hwaddr_aton(NULL, hwaddr);
+
+				if (hlen == 0) {
 					syslog(LOG_DEBUG,
 					    "%s: invalid hw addr", hwaddr);
 					continue;
 				}
-				if (len > HWADDR_LEN) {
+				if (hlen > HWADDR_LEN) {
 					syslog(LOG_DEBUG,
 					    "%s: hw addr too long", hwaddr);
 					continue;

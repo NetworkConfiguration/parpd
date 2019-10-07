@@ -59,7 +59,7 @@ bpf_open_arp(struct interface *ifp)
 	struct bpf_version pv;
 	struct bpf_program pf;
 #ifdef BIOCIMMEDIATE
-	int flags;
+	unsigned int flags;
 #endif
 #ifdef _PATH_BPF
 	fd = open(_PATH_BPF, O_RDWR | O_NONBLOCK);

@@ -27,6 +27,7 @@
 #include <sys/types.h>
 #include <sys/ioctl.h>
 #include <sys/socket.h>
+#include <sys/uio.h>
 
 #include <arpa/inet.h>
 #include <net/if.h>
@@ -91,7 +92,7 @@ bpf_open_arp(struct interface *ifp)
 	memset(&su, 0, sizeof(su));
 	su.sll.sll_family = PF_PACKET;
 	su.sll.sll_protocol = htons(ETH_P_ALL);
-	su.sll.sll_ifindex = if_nametoindex(ifp->ifname);
+	su.sll.sll_ifindex = (int)if_nametoindex(ifp->ifname);
 	if (bind(s, &su.sa, sizeof(su.sll)) == -1)
 		goto eexit;
 
@@ -140,7 +141,7 @@ bpf_read(struct interface *ifp, void *data, size_t len)
 	}
 	bytes -= ETHER_HDR_LEN;
 	if ((size_t)bytes > len)
-		bytes = len;
-	memcpy(data, ifp->buffer + ETHER_HDR_LEN, bytes);
+		bytes = (ssize_t)len;
+	memcpy(data, ifp->buffer + ETHER_HDR_LEN, (size_t)bytes);
 	return bytes;
 }

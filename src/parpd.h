@@ -35,14 +35,29 @@
 #include <sys/rbtree.h>
 #endif
 
-#define VERSION			"1.99"
-#define PARPD_CONF		SYSCONFDIR "/parpd.conf"
+#define	VERSION			"1.99"
+#define	PARPD_CONF		SYSCONFDIR "/parpd.conf"
 
-#define HWADDR_LEN		20
+#define	HWADDR_LEN		20
 
-#define PARPD_IGNORE		0
-#define PARPD_PROXY		1
-#define PARPD_HALFPROXY		2
+#define	PARPD_IGNORE		0
+#define	PARPD_PROXY		1
+#define	PARPD_HALFPROXY		2
+#define	PARPD_ATTACK		3
+
+/* RFC 5227 Section 1.1 */
+#define	ANNOUNCE_NUM		2
+#define	ANNOUNCE_INTERVAL	2
+
+/* Expire addresses to attack in a timely manner. */
+#define	ATTACK_EXPIRE		(ANNOUNCE_NUM * ANNOUNCE_INTERVAL) + 1
+
+struct ipaddr {
+	rb_node_t rbtree;
+	struct interface *ifp;
+	in_addr_t ipaddr;
+	size_t nannounced;
+};
 
 struct pent {
 	rb_node_t rbtree;
@@ -56,6 +71,7 @@ struct pent {
 struct interface
 {
 	rb_node_t rbtree;
+	struct ctx *ctx;
 	char ifname[IF_NAMESIZE];
 	sa_family_t family;
 	unsigned char hwaddr[HWADDR_LEN];
@@ -63,6 +79,15 @@ struct interface
 	int fd;
 	size_t buffer_size, buffer_len, buffer_pos;
 	unsigned char *buffer;
+	rb_tree_t pents;
+	rb_tree_t ipaddrs;
+};
+
+struct ctx {
+	struct eloop *eloop;
+	const char *cffile;
+	time_t config_mtime;
+	rb_tree_t ifaces;
 	rb_tree_t pents;
 };
 

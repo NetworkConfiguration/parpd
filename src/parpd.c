@@ -64,12 +64,6 @@ const char copyright[] = "Copyright (c) 2008-2017 Roy Marples";
 #include "parpd.h"
 #include "eloop.h"
 
-static const char *cffile = PARPD_CONF;
-static time_t config_mtime;
-
-static rb_tree_t ifaces;
-static rb_tree_t pents;
-
 static char hwaddr_buffer[(HWADDR_LEN * 3) + 1];
 
 static void
@@ -139,7 +133,7 @@ hwaddr_ntoa(const unsigned char *hwaddr, size_t hwlen)
 static int
 if_compare(__unused void *context, const void *node1, const void *node2)
 {
-        const struct interface *if1 = node1, *if2 = node2;
+	const struct interface *if1 = node1, *if2 = node2;
 
 	return strcmp(if1->ifname, if2->ifname);
 }
@@ -154,7 +148,7 @@ static const rb_tree_ops_t if_compare_ops = {
 static int
 p_compare(__unused void *context, const void *node1, const void *node2)
 {
-        const struct pent *p1 = node1, *p2 = node2;
+	const struct pent *p1 = node1, *p2 = node2;
 	in_addr_t p2net;
 
 	/* When searching for a node, the node we're finding is based on
@@ -174,6 +168,21 @@ static const rb_tree_ops_t p_compare_ops = {
 	.rbto_compare_nodes = p_compare,
 	.rbto_compare_key = p_compare,
 	.rbto_node_offset = offsetof(struct pent, rbtree),
+	.rbto_context = NULL
+};
+
+static int
+ip_compare(__unused void *context, const void *node1, const void *node2)
+{
+	const struct ipaddr *ip1 = node1, *ip2 = node2;
+
+	return (int)(ip1->ipaddr - ip2->ipaddr);
+}
+
+static const rb_tree_ops_t ip_compare_ops = {
+	.rbto_compare_nodes = ip_compare,
+	.rbto_compare_key = ip_compare,
+	.rbto_node_offset = offsetof(struct ipaddr, rbtree),
 	.rbto_context = NULL
 };
 
@@ -217,17 +226,17 @@ get_word(char **s, const char *e)
 }
 
 static void
-free_config(void)
+free_config(struct ctx *ctx)
 {
 	struct interface *ifp;
 
-	free_pents(&pents);
-	RB_TREE_FOREACH(ifp, &ifaces)
+	free_pents(&ctx->pents);
+	RB_TREE_FOREACH(ifp, &ctx->ifaces)
 		free_pents(&ifp->pents);
 }
 
 static int
-load_config(void)
+load_config(struct ctx *ctx)
 {
 	struct stat st;
 	FILE *f;
@@ -241,19 +250,19 @@ load_config(void)
 	in_addr_t net;
 	struct interface *ifp;
 
-	if (stat(cffile, &st) == -1) {
-		free_config();
+	if (stat(ctx->cffile, &st) == -1) {
+		free_config(ctx);
 		return -1;
 	}
-	if (config_mtime == st.st_mtime)
+	if (ctx->config_mtime == st.st_mtime)
 		return 0;
 
-	free_config();
-	f = fopen(cffile, "r");
+	free_config(ctx);
+	f = fopen(ctx->cffile, "r");
 	if (f == NULL)
 		return -1;
 
-	config_mtime = st.st_mtime;
+	ctx->config_mtime = st.st_mtime;
 	ifp = NULL;
 	in_interface = 0;
 	buf = NULL;
@@ -271,13 +280,15 @@ load_config(void)
 		else if (strcmp(cmd, "half") == 0 ||
 		    strcmp(cmd, "halfproxy") == 0)
 			act = PARPD_HALFPROXY;
+		else if (strcmp(cmd, "attack") == 0)
+			act = PARPD_ATTACK;
 		else if (strcmp(cmd, "ignore") == 0)
 			act = PARPD_IGNORE;
 		else if (strcmp(cmd, "interface") == 0) {
 			struct interface iff = { .fd = -1 };
 
 			strlcpy(iff.ifname, match, sizeof(iff.ifname));
-			ifp = rb_tree_find_node(&ifaces, &iff);
+			ifp = rb_tree_find_node(&ctx->ifaces, &iff);
 			if (ifp == NULL)
 				syslog(LOG_ERR,
 				    "%s: unknown interface", match);
@@ -344,7 +355,7 @@ load_config(void)
 		/* OK, good to add now. */
 		pp = malloc(sizeof(*pp));
 		if (pp == NULL) {
-			free_config();
+			free_config(ctx);
 			return -1;
 		}
 		pp->action = act;
@@ -357,7 +368,7 @@ load_config(void)
 		if (ifp)
 			rb_tree_insert_node(&ifp->pents, pp);
 		else
-			rb_tree_insert_node(&pents, pp);
+			rb_tree_insert_node(&ctx->pents, pp);
 	}
 	fclose(f);
 	free(buf);
@@ -365,11 +376,12 @@ load_config(void)
 }
 
 static int
-proxy(rb_tree_t *ps, in_addr_t ip, const uint8_t **hw, size_t *hwlen)
+proxy(struct ctx *ctx, rb_tree_t *ps, in_addr_t ip,
+    const uint8_t **hw, size_t *hwlen)
 {
 	struct pent pf = { .ip = ip }, *pp;
 
-	if (load_config() == -1)
+	if (load_config(ctx) == -1)
 		return -1;
 
 	pp = rb_tree_find_node(ps, &pf);
@@ -418,11 +430,21 @@ send_arp(const struct interface *ifp, uint16_t op, size_t hlen,
 	return bpf_write(ifp, tha, hlen, arp_buffer, len);
 }
 
+static void
+expire_ipaddr(void *arg)
+{
+	struct ipaddr *ipa = arg;
+
+	rb_tree_remove_node(&ipa->ifp->ipaddrs, ipa);
+	free(ipa);
+}
+
 /* Checks an incoming ARP message to see if we should proxy for it. */
 static void
 handle_arp(void *arg)
 {
 	struct interface *ifp = arg;
+	struct ctx *ctx = ifp->ctx;
 	uint8_t arp_buffer[ARP_LEN], *shw, *thw;
 	const uint8_t *phw;
 	struct arphdr ar;
@@ -431,6 +453,7 @@ handle_arp(void *arg)
 	ssize_t bytes;
 	struct in_addr ina;
 	int action;
+	struct ipaddr *ipa;
 
 	for(;;) {
 		bytes = bpf_read(ifp, arp_buffer, sizeof(arp_buffer));
@@ -470,12 +493,13 @@ handle_arp(void *arg)
 		ina.s_addr = tip;
 		syslog(LOG_DEBUG, "%s: received ARPOP_REQUEST for %s",
 		    ifp->ifname, inet_ntoa(ina));
-		if ((action = proxy(&ifp->pents, tip, &phw, &hwlen)) == -1) {
+		if ((action = proxy(ctx, &ifp->pents, tip, &phw, &hwlen)) == -1)
+		{
 			syslog(LOG_ERR, "proxy: %m");
 			continue;
 		}
 		if (action == PARPD_IGNORE &&
-		    (action = proxy(&pents, tip, &phw, &hwlen)) == -1)
+		    (action = proxy(ctx, &ctx->pents, tip, &phw, &hwlen)) == -1)
 		{
 			syslog(LOG_ERR, "proxy: %m");
 			continue;
@@ -484,6 +508,35 @@ handle_arp(void *arg)
 			continue;
 		if (action == PARPD_HALFPROXY && sip == INADDR_ANY)
 			continue;
+
+		if (action == PARPD_ATTACK) {
+			struct ipaddr ipf = { .ipaddr = sip };
+
+			/* Only attack announcements. */
+			if (tip != sip)
+				continue;
+
+			ipa = rb_tree_find_node(&ifp->ipaddrs, &ipf);
+			if (ipa == NULL) {
+				ipa = calloc(1, sizeof(*ipa));
+				if (ipa == NULL) {
+					syslog(LOG_ERR, "calloc: %m");
+					continue;
+				}
+				ipa->ifp = ifp;
+				ipa->ipaddr = sip;
+				rb_tree_insert_node(&ifp->ipaddrs, ipa);
+			}
+
+			/* Expire the entry if no follow-up. */
+			eloop_timeout_add_sec(ctx->eloop, ATTACK_EXPIRE,
+			    expire_ipaddr, ipa);
+
+			/* Only attack fully announced. */
+			if (++ipa->nannounced < ANNOUNCE_NUM)
+				continue;
+		}
+
 		/* If no hardware address specified in config,
 		 * use the interface hardware address */
 		if (hwlen == 0) {
@@ -533,7 +586,7 @@ ifa_valid(int s, const struct ifaddrs *ifa)
 }
 
 static void
-discover_interfaces(int argc, char * const *argv)
+discover_interfaces(struct ctx *ctx, int argc, char * const *argv)
 {
 	struct ifaddrs *ifaddrs, *ifa;
 	int s, i;
@@ -573,6 +626,7 @@ discover_interfaces(int argc, char * const *argv)
 			break;
 		}
 		strlcpy(ifp->ifname, ifa->ifa_name, sizeof(ifp->ifname));
+		ifp->ctx = ctx;
 		ifp->fd = -1;
 
 #ifdef AF_LINK
@@ -599,10 +653,11 @@ discover_interfaces(int argc, char * const *argv)
 #endif
 
 		rb_tree_init(&ifp->pents, &p_compare_ops);
+		rb_tree_init(&ifp->ipaddrs, &ip_compare_ops);
 
 		/* Some systems have more than one AF_LINK.
 		 * The first one returned is the active one. */
-		ifs = rb_tree_insert_node(&ifaces, ifp);
+		ifs = rb_tree_insert_node(&ctx->ifaces, ifp);
 		if (ifs != ifp) {
 			free(ifp);
 			continue;
@@ -632,6 +687,7 @@ parpd_signal_cb(int sig, void *arg)
 int
 main(int argc, char **argv)
 {
+	struct ctx ctx = { .cffile = PARPD_CONF };
 	struct interface *ifp, *pifp;
 	int opt, fflag = 0, i;
 	struct eloop *eloop;
@@ -642,7 +698,7 @@ main(int argc, char **argv)
 	openlog("parpd", LOG_PERROR, LOG_DAEMON);
 	setlogmask(LOG_UPTO(LOG_NOTICE));
 
-	if ((eloop = eloop_new()) == NULL) {
+	if ((ctx.eloop = eloop = eloop_new()) == NULL) {
 		syslog(LOG_ERR, "eloop_new: %m");
 		goto out;
 	}
@@ -660,7 +716,7 @@ main(int argc, char **argv)
 	{
 		switch (opt) {
 		case 'c':
-			cffile = optarg;
+			ctx.cffile = optarg;
 			break;
 		case 'd':
 			setlogmask(LOG_UPTO(LOG_DEBUG));
@@ -681,33 +737,33 @@ main(int argc, char **argv)
 
 	opt = EXIT_FAILURE;
 
-	rb_tree_init(&ifaces, &if_compare_ops);
-	rb_tree_init(&pents, &p_compare_ops);
+	rb_tree_init(&ctx.ifaces, &if_compare_ops);
+	rb_tree_init(&ctx.pents, &p_compare_ops);
 
-	discover_interfaces(argc, argv);
+	discover_interfaces(&ctx, argc, argv);
 	for (i = 0; i < argc; i++) {
 		struct interface iff = { .fd = -1 };
 
 		strlcpy(iff.ifname, argv[i], sizeof(iff.ifname));
-		ifp = rb_tree_find_node(&ifaces, &iff);
+		ifp = rb_tree_find_node(&ctx.ifaces, &iff);
 		if (ifp == NULL) {
 			syslog(LOG_ERR, "%s: no such interface", argv[i]);
 			goto out;
 		}
 	}
-	if (RB_TREE_MIN(&ifaces) == NULL) {
+	if (RB_TREE_MIN(&ctx.ifaces) == NULL) {
 		syslog(LOG_ERR, "no suitable interfaces found");
 		goto out;
 	}
 
-	if (load_config() == -1) {
-		syslog(LOG_ERR, "%s: %m", cffile);
+	if (load_config(&ctx) == -1) {
+		syslog(LOG_ERR, "%s: %m", ctx.cffile);
 		goto out;
 	}
 
-	have_pents = (RB_TREE_MIN(&pents) != NULL);
+	have_pents = (RB_TREE_MIN(&ctx.pents) != NULL);
 	pifp = NULL;
-	RB_TREE_FOREACH(ifp, &ifaces) {
+	RB_TREE_FOREACH(ifp, &ctx.ifaces) {
 		bool if_have_pents = (RB_TREE_MIN(&ifp->pents) != NULL);
 
 		if (if_have_pents)
@@ -724,7 +780,7 @@ main(int argc, char **argv)
 		eloop_event_add(eloop, ifp->fd, handle_arp, ifp);
 	}
 	if (pifp == NULL && !have_pents) {
-		syslog(LOG_ERR, "%s: no valid entries", cffile);
+		syslog(LOG_ERR, "%s: no valid entries", ctx.cffile);
 		goto out;
 	}
 
@@ -744,10 +800,16 @@ main(int argc, char **argv)
 	opt = eloop_start(eloop, &sigset);
 
 out:
-	free_pents(&pents);
-	while ((ifp = RB_TREE_MIN(&ifaces)) != NULL) {
-		rb_tree_remove_node(&ifaces, ifp);
+	free_pents(&ctx.pents);
+	while ((ifp = RB_TREE_MIN(&ctx.ifaces)) != NULL) {
+		struct ipaddr *ipa;
+
+		rb_tree_remove_node(&ctx.ifaces, ifp);
 		free_pents(&ifp->pents);
+		while ((ipa = RB_TREE_MIN(&ifp->ipaddrs)) != NULL) {
+			rb_tree_remove_node(&ifp->ipaddrs, ipa);
+			free(ipa);
+		}
 		free(ifp->buffer);
 		free(ifp);
 	}

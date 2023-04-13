@@ -38,7 +38,6 @@
 #include <errno.h>
 #include <fcntl.h>
 #include <limits.h>
-#include <paths.h>
 #include <stddef.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -61,17 +60,20 @@ bpf_open_arp(struct interface *ifp)
 #ifdef BIOCIMMEDIATE
 	unsigned int flags;
 #endif
-#ifdef _PATH_BPF
-	fd = open(_PATH_BPF, O_RDWR | O_NONBLOCK);
-#else
-	char device[PATH_MAX];
-	int n = 0;
 
-	do {
-		snprintf(device, sizeof(device), "/dev/bpf%d", n++);
-		fd = open(device, O_RDWR | O_NONBLOCK);
-	} while (fd == -1 && errno == EBUSY);
-#endif
+	/* /dev/bpf is a cloner on modern kernels */
+	fd = open("/dev/bpf", O_RDWR | O_NONBLOCK);
+
+	/* Support older kernels where /dev/bpf is not a cloner */
+	if (fd == -1) {
+		char device[PATH_MAX];
+		int n = 0;
+
+		do {
+			snprintf(device, sizeof(device), "/dev/bpf%d", n++);
+			fd = open(device, O_RDWR | O_NONBLOCK);
+		} while (fd == -1 && errno == EBUSY);
+	}
 
 	if (fd == -1)
 		return -1;

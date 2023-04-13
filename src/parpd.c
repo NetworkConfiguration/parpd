@@ -441,7 +441,7 @@ expire_ipaddr(void *arg)
 
 /* Checks an incoming ARP message to see if we should proxy for it. */
 static void
-handle_arp(void *arg)
+handle_arp(void *arg, unsigned short events)
 {
 	struct interface *ifp = arg;
 	struct ctx *ctx = ifp->ctx;
@@ -454,6 +454,10 @@ handle_arp(void *arg)
 	struct in_addr ina;
 	int action;
 	struct ipaddr *ipa;
+
+	if (events != ELE_READ)
+		syslog(LOG_ERR, "%s: unexpected event 0x%04x",
+		    __func__, events);
 
 	for(;;) {
 		bytes = bpf_read(ifp, arp_buffer, sizeof(arp_buffer));
@@ -777,7 +781,7 @@ main(int argc, char **argv)
 		}
 
 		syslog(LOG_DEBUG, "proxying on %s", ifp->ifname);
-		eloop_event_add(eloop, ifp->fd, handle_arp, ifp);
+		eloop_event_add(eloop, ifp->fd, ELE_READ, handle_arp, ifp);
 	}
 	if (pifp == NULL && !have_pents) {
 		syslog(LOG_ERR, "%s: no valid entries", ctx.cffile);
@@ -791,7 +795,7 @@ main(int argc, char **argv)
 		}
 
 		/* At least for kqueue, poll_fd gets invalidated by fork */
-                if (eloop_requeue(eloop) == -1) {
+                if (eloop_forked(eloop) == -1) {
                         syslog(LOG_ERR, "eloop_requeue after fork: %m");
                         goto out;
                 }

@@ -1,17 +1,18 @@
 SUBDIRS=	src
 
-VERSION!=	sed -n 's/\#define VERSION[[:space:]]*"\(.*\)".*/\1/p' src/parpd.h
+PACKAGE=	parpd
+VERSION!=	sed -n 's/\#define[[:space:]]*VERSION[[:space:]]*"\(.*\)".*/\1/p' src/parpd.h
 
 DIST!=		if test -d .git; then echo "dist-git"; \
 		else echo "dist-inst"; fi
 GITREF?=	HEAD
 
 DISTSUFFIX=
-DISTPREFIX?=	parpd-${VERSION}${DISTSUFFIX}
-DISTFILEGZ?=	${DISTPREFIX}.tar.gz
+DISTPREFIX?=	${PACKAGE}-${VERSION}${DISTSUFFIX}
 DISTFILE?=	${DISTPREFIX}.tar.xz
 DISTINFO=	${DISTFILE}.distinfo
-DISTINFOSIGN=	${DISTINFO}.asc
+DISTINFOMD=	${DISTINFO}.md
+DISTSIGN=	${DISTFILE}.asc
 
 CLEANFILES+=	*.tar.xz
 
@@ -53,12 +54,22 @@ dist-inst:
 dist: ${DIST}
 
 distinfo: dist
-	rm -f ${DISTINFO} ${DISTINFOSIGN}
-	${CKSUM} ${DISTFILE} >${DISTINFO}
-	#printf "SIZE (${DISTFILE}) = %s\n" $$(wc -c <${DISTFILE}) >>${DISTINFO}
-	${PGP} --clearsign --output=${DISTINFOSIGN} ${DISTINFO}
-	chmod 644 ${DISTINFOSIGN}
-	ls -l ${DISTFILE} ${DISTINFO} ${DISTINFOSIGN}
+	rm -f ${DISTINFO} ${DISTSIGN}
+	${SHA256} ${DISTFILE} >${DISTINFO}
+	${PGP} --armour --detach-sign ${DISTFILE}
+	chmod 644 ${DISTSIGN}
+	ls -l ${DISTFILE} ${DISTINFO} ${DISTSIGN}
+
+${DISTINFOMD}: ${DISTINFO}
+	echo '```' >${DISTINFOMD}
+	cat ${DISTINFO} >>${DISTINFOMD}
+	echo '```' >>${DISTINFOMD}
+
+release: distinfo ${DISTINFOMD}
+	gh release create v${VERSION} \
+		--title "${PACKAGE} ${VERSION}" --draft --generate-notes \
+		--notes-file ${DISTINFOMD} \
+		${DISTFILE} ${DISTSIGN}
 
 snapshot:
 	rm -rf /tmp/${DISTPREFIX}
@@ -74,7 +85,7 @@ _import: dist
 	tar xvpf ${DISTFILE} -C ${DESTDIR} --strip 1
 	@${ECHO}
 	@${ECHO} "============================================================="
-	@${ECHO} "parpd-${VERSION} imported to ${DESTDIR}"
+	@${ECHO} "${PACKAGE}-${VERSION} imported to ${DESTDIR}"
 
 import:
 	${MAKE} _import DESTDIR=`if [ -n "${DESTDIR}" ]; then echo "${DESTDIR}"; else  echo /tmp/${DISTPREFIX}; fi`
@@ -87,7 +98,7 @@ _import-src:
 	for x in ${SUBDIRS}; do cd $$x; ${MAKE} DESTDIR=${DESTDIR} $@ || exit $$?; cd ..; done
 	@${ECHO}
 	@${ECHO} "============================================================="
-	@${ECHO} "parpd-${VERSION} imported to ${DESTDIR}"
+	@${ECHO} "${PACKAGE}-${VERSION} imported to ${DESTDIR}"
 
 import-src:
 	${MAKE} _import-src DESTDIR=`if [ -n "${DESTDIR}" ]; then echo "${DESTDIR}"; else  echo /tmp/${DISTPREFIX}; fi`

@@ -49,9 +49,9 @@ for x do
 	--disable-maintainer-mode|--disable-dependency-tracking) ;;
 	--disable-silent-rules) ;;
 	-V|--version)
-		v=$(sed -ne 's/.*VERSION[[:space:]]*"\([^"]*\).*/\1/p' defs.h);
-		c=$(sed -ne 's/^.*copyright\[\] = "\([^"]*\).*/\1/p' dhcpcd.c);
-		echo "dhcpcd-$v $c";
+		v=$(sed -ne 's/.*VERSION[[:space:]]*"\([^"]*\).*/\1/p' src/parpd.h);
+		c=$(sed -ne 's/^.*copyright\[\] = "\([^"]*\).*/\1/p' src/parpd.c);
+		echo "parpd-$v $c";
 		exit 0;;
 	-h|--help) cat <<EOF
 \`configure' configures this package to adapt to many kinds of systems.

@@ -14,9 +14,8 @@ LINT?=		lint
 SED?=		sed
 HOST_SH?=	/bin/sh
 
-# This isn't very portable, but I generaly make releases from NetBSD
-CKSUM?=		cksum -a SHA256
-PGP?=		netpgp
+SHA256?=	sha256
+PGP?=		gpg
 
 SED_RUNDIR=		-e 's:@RUNDIR@:${RUNDIR}:g'
 SED_SYS=		-e 's:@SYSCONFDIR@:${SYSCONFDIR}:g'

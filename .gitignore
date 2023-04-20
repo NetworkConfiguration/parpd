@@ -5,3 +5,8 @@ config.log
 *.o
 parpd
 parpd.8
+
+*.tar.xz
+*.asc
+*.distinfo
+*.distinfo.md

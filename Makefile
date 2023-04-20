@@ -37,7 +37,7 @@ clean:
 
 distclean: clean
 	rm -f config.h config.mk config.log \
-		${DISTFILE} ${DISTFILEGZ} ${DISTINFO} ${DISTINFOSIGN}
+		${DISTFILE} ${DISTFILE} ${DISTINFO} ${DISTINFOMD} ${DISTSIGN}
 	rm -f *.diff *.patch *.orig *.rej
 	for x in ${SUBDIRS}; do cd $$x; ${MAKE} $@ || exit $$?; cd ..; done
 

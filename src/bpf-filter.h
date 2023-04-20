@@ -1,6 +1,6 @@
 /*
  * parpd: ARP BPF filter
- * Copyright (c) 2006-2017 Roy Marples <roy@marples.name>
+ * Copyright (c) 2006-2023 Roy Marples <roy@marples.name>
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions

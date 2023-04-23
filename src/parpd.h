@@ -35,7 +35,7 @@
 #include <sys/rbtree.h>
 #endif
 
-#define	VERSION			"2.1"
+#define	VERSION			"2.1.1"
 #define	PARPD_CONF		SYSCONFDIR "/parpd.conf"
 
 #define	HWADDR_LEN		20

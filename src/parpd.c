@@ -52,6 +52,7 @@ const char copyright[] = "Copyright (c) 2008-2017 Roy Marples";
 #include <fcntl.h>
 #include <getopt.h>
 #include <ifaddrs.h>
+#include <stdbool.h>
 #include <stddef.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -146,32 +147,6 @@ static const rb_tree_ops_t if_compare_ops = {
 };
 
 static int
-p_compare(__unused void *context, const void *node1, const void *node2)
-{
-	const struct pent *p1 = node1, *p2 = node2;
-	in_addr_t p2net;
-
-	/* When searching for a node, the node we're finding is based on
-	 * node 2. As far as pard is concerned, we only find an ip address
-	 * so we need to compare it to the network from node 1.
-	 * But we also need to allow node 2 to have a valid configuration
-	 * when we initially load it. */
-	if (p2->net != INADDR_ANY || p2->ip == INADDR_ANY)
-		p2net = p2->net;
-	else
-		p2net = p1->net;
-
-	return (int)((p1->ip & p1->net) - (p2->ip & p2net));
-}
-
-static const rb_tree_ops_t p_compare_ops = {
-	.rbto_compare_nodes = p_compare,
-	.rbto_compare_key = p_compare,
-	.rbto_node_offset = offsetof(struct pent, rbtree),
-	.rbto_context = NULL
-};
-
-static int
 ip_compare(__unused void *context, const void *node1, const void *node2)
 {
 	const struct ipaddr *ip1 = node1, *ip2 = node2;
@@ -186,16 +161,6 @@ static const rb_tree_ops_t ip_compare_ops = {
 	.rbto_context = NULL
 };
 
-static void
-free_pents(rb_tree_t *pp)
-{
-	struct pent *pn;
-
-	while ((pn = RB_TREE_MIN(pp)) != NULL) {
-		rb_tree_remove_node(pp, pn);
-		free(pn);
-	}
-}
 
 /* Because fgetln does not return C strings, we cannot use
  * functions such as strsep and friends to extract words.
@@ -226,13 +191,24 @@ get_word(char **s, const char *e)
 }
 
 static void
+free_pents(struct pent_head *pents) {
+	struct pent *pp;
+
+	while ((pp = TAILQ_FIRST(pents)) != NULL) {
+		TAILQ_REMOVE(pents, pp, next);
+		free(pp);
+	}
+}
+
+static void
 free_config(struct ctx *ctx)
 {
 	struct interface *ifp;
 
 	free_pents(&ctx->pents);
-	RB_TREE_FOREACH(ifp, &ctx->ifaces)
+	RB_TREE_FOREACH(ifp, &ctx->ifaces) {
 		free_pents(&ifp->pents);
+	}
 }
 
 static int
@@ -249,6 +225,7 @@ load_config(struct ctx *ctx)
 	struct in_addr ina;
 	in_addr_t net;
 	struct interface *ifp;
+	struct pent_head *pents;
 
 	if (stat(ctx->cffile, &st) == -1) {
 		free_config(ctx);
@@ -365,31 +342,40 @@ load_config(struct ctx *ctx)
 			pp->hwlen = 0;
 		else
 			pp->hwlen = hwaddr_aton(pp->hwaddr, hwaddr);
-		if (ifp)
-			rb_tree_insert_node(&ifp->pents, pp);
-		else
-			rb_tree_insert_node(&ctx->pents, pp);
+		pents = ifp != NULL ? &ifp->pents : &ctx->pents;
+		TAILQ_INSERT_TAIL(pents, pp, next);
 	}
 	fclose(f);
 	free(buf);
 	return 0;
 }
 
+static inline bool
+pent_matches(const struct pent *pent, in_addr_t ip) {
+	return pent->ip == (ip & pent->net);
+}
+
 static int
-proxy(struct ctx *ctx, rb_tree_t *ps, in_addr_t ip,
+proxy(struct ctx *ctx, struct interface *ifp, in_addr_t ip,
     const uint8_t **hw, size_t *hwlen)
 {
-	struct pent pf = { .ip = ip }, *pp;
+	struct pent *pp;
 
 	if (load_config(ctx) == -1)
 		return -1;
 
-	pp = rb_tree_find_node(ps, &pf);
+	/* Process rules backwards so that we match hosts before subnets */
+	TAILQ_FOREACH_REVERSE(pp, &ifp->pents, pent_head, next) {
+		if (pent_matches(pp, ip))
+			break;
+	}
 	if (pp == NULL) {
-		pf.ip = INADDR_ANY;
-		pp = rb_tree_find_node(ps, &pf);
+		TAILQ_FOREACH_REVERSE(pp, &ctx->pents, pent_head, next) {
+			if (pent_matches(pp, ip))
+				break;
+		}
 		if (pp == NULL)
-			 return PARPD_IGNORE;
+			return PARPD_IGNORE;
 	}
 
 	if (pp->action) {
@@ -497,13 +483,7 @@ handle_arp(void *arg, unsigned short events)
 		ina.s_addr = tip;
 		syslog(LOG_DEBUG, "%s: received ARPOP_REQUEST for %s",
 		    ifp->ifname, inet_ntoa(ina));
-		if ((action = proxy(ctx, &ifp->pents, tip, &phw, &hwlen)) == -1)
-		{
-			syslog(LOG_ERR, "proxy: %m");
-			continue;
-		}
-		if (action == PARPD_IGNORE &&
-		    (action = proxy(ctx, &ctx->pents, tip, &phw, &hwlen)) == -1)
+		if ((action = proxy(ctx, ifp, tip, &phw, &hwlen)) == -1)
 		{
 			syslog(LOG_ERR, "proxy: %m");
 			continue;
@@ -594,7 +574,7 @@ discover_interfaces(struct ctx *ctx, int argc, char * const *argv)
 {
 	struct ifaddrs *ifaddrs, *ifa;
 	int s, i;
-	struct interface *ifs, *ifp;
+	struct interface *ifp, *ifs;
 #ifdef AF_LINK
 	const struct sockaddr_dl *sdl;
 #elif AF_PACKET
@@ -611,7 +591,6 @@ discover_interfaces(struct ctx *ctx, int argc, char * const *argv)
 		return;
 	}
 
-	ifs = NULL;
 	for (ifa = ifaddrs; ifa; ifa = ifa->ifa_next) {
 		if (ifa_valid(s, ifa) != 1)
 			continue;
@@ -656,7 +635,7 @@ discover_interfaces(struct ctx *ctx, int argc, char * const *argv)
 			memcpy(ifp->hwaddr, sll->sll_addr, ifp->hwlen);
 #endif
 
-		rb_tree_init(&ifp->pents, &p_compare_ops);
+		TAILQ_INIT(&ifp->pents);
 		rb_tree_init(&ifp->ipaddrs, &ip_compare_ops);
 
 		/* Some systems have more than one AF_LINK.
@@ -742,7 +721,7 @@ main(int argc, char **argv)
 	opt = EXIT_FAILURE;
 
 	rb_tree_init(&ctx.ifaces, &if_compare_ops);
-	rb_tree_init(&ctx.pents, &p_compare_ops);
+	TAILQ_INIT(&ctx.pents);
 
 	discover_interfaces(&ctx, argc, argv);
 	for (i = 0; i < argc; i++) {
@@ -765,10 +744,10 @@ main(int argc, char **argv)
 		goto out;
 	}
 
-	have_pents = (RB_TREE_MIN(&ctx.pents) != NULL);
+	have_pents = (TAILQ_FIRST(&ctx.pents) != NULL);
 	pifp = NULL;
 	RB_TREE_FOREACH(ifp, &ctx.ifaces) {
-		bool if_have_pents = (RB_TREE_MIN(&ifp->pents) != NULL);
+		bool if_have_pents = (TAILQ_FIRST(&ifp->pents) != NULL);
 
 		if (if_have_pents)
 			pifp = ifp;
@@ -804,12 +783,11 @@ main(int argc, char **argv)
 	opt = eloop_start(eloop, &sigset);
 
 out:
-	free_pents(&ctx.pents);
+	free_config(&ctx);
 	while ((ifp = RB_TREE_MIN(&ctx.ifaces)) != NULL) {
 		struct ipaddr *ipa;
 
 		rb_tree_remove_node(&ctx.ifaces, ifp);
-		free_pents(&ifp->pents);
 		while ((ipa = RB_TREE_MIN(&ifp->ipaddrs)) != NULL) {
 			rb_tree_remove_node(&ifp->ipaddrs, ipa);
 			free(ipa);

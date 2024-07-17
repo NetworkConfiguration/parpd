@@ -31,8 +31,13 @@
 #include <net/if.h>
 
 #include "config.h"
+
 #ifdef HAVE_SYS_RBTREE_H
 #include <sys/rbtree.h>
+#endif
+
+#ifdef HAVE_SYS_QUEUE_H
+#include <sys/queue.h>
 #endif
 
 #define	VERSION			"2.1.1"
@@ -60,13 +65,14 @@ struct ipaddr {
 };
 
 struct pent {
-	rb_node_t rbtree;
+	TAILQ_ENTRY(pent) next;
 	char action;
 	in_addr_t ip;
 	in_addr_t net;
 	uint8_t hwaddr[HWADDR_LEN];
 	size_t hwlen;
 };
+TAILQ_HEAD (pent_head, pent);
 
 struct interface
 {
@@ -79,7 +85,7 @@ struct interface
 	int fd;
 	size_t buffer_size, buffer_len, buffer_pos;
 	unsigned char *buffer;
-	rb_tree_t pents;
+	struct pent_head pents;
 	rb_tree_t ipaddrs;
 };
 
@@ -88,7 +94,7 @@ struct ctx {
 	const char *cffile;
 	time_t config_mtime;
 	rb_tree_t ifaces;
-	rb_tree_t pents;
+	struct pent_head pents;
 };
 
 int bpf_open_arp(struct interface *);

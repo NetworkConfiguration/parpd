@@ -191,13 +191,22 @@ get_word(char **s, const char *e)
 }
 
 static void
-free_pents(struct pent_head *pents) {
-	struct pent *pp;
+free_prefix(__unused void *arg, __unused const void *key, __unused size_t len,
+    void *val)
+{
 
-	while ((pp = TAILQ_FIRST(pents)) != NULL) {
-		TAILQ_REMOVE(pents, pp, next);
-		free(pp);
-	}
+	free(val);
+}
+
+static void free_prefixes(lpm_t **prefixes)
+{
+
+	if (*prefixes == NULL)
+		return;
+
+	lpm_clear(*prefixes, free_prefix, NULL);
+	free(*prefixes);
+	*prefixes = NULL;
 }
 
 static void
@@ -205,27 +214,27 @@ free_config(struct ctx *ctx)
 {
 	struct interface *ifp;
 
-	free_pents(&ctx->pents);
+	free_prefixes(&ctx->prefixes);
 	RB_TREE_FOREACH(ifp, &ctx->ifaces) {
-		free_pents(&ifp->pents);
+		free_prefixes(&ifp->prefixes);
 	}
 }
 
 static int
 load_config(struct ctx *ctx)
 {
+	int error = -1;
 	struct stat st;
 	FILE *f;
 	char *buf, *cmd, *match, *hwaddr, *bp, *p, *e, *r, act;
 	size_t buf_len;
 	ssize_t len;
-	struct pent *pp;
-	long cidr;
+	struct prefix *pp;
+	long plen;
 	int in_interface;
 	struct in_addr ina;
-	in_addr_t net;
 	struct interface *ifp;
-	struct pent_head *pents;
+	lpm_t *prefixes;
 
 	if (stat(ctx->cffile, &st) == -1) {
 		free_config(ctx);
@@ -281,28 +290,30 @@ load_config(struct ctx *ctx)
 			syslog(LOG_DEBUG, "no ip/cidr given");
 			continue;
 		}
-		net = ~0U;
+		plen = 32;
 		p = strchr(match, '/');
 		if (p) {
 			*p++ = '\0';
 			if (*p) {
 				errno = 0;
-				cidr = strtol(p, &r, 10);
+				plen = strtol(p, &r, 10);
 				if (errno == 0 && !*r) {
-					if (cidr < 0 || cidr > 32) {
+					if (plen < 0 || plen > 32) {
 						syslog(LOG_DEBUG,
 						    "%s: invalid cidr", p);
 						continue;
 					}
-					net <<= (32 - cidr);
-					net = htonl(net);
 				} else {
 					if (inet_aton(p, &ina) == 0) {
 						syslog(LOG_DEBUG,
 						    "%s: invalid mask", p);
 						continue;
 					}
-					net = ina.s_addr;
+					plen = 0;
+					while (ina.s_addr) {
+						plen++;
+						ina.s_addr <<= 1;
+					}
 				}
 			}
 		}
@@ -329,54 +340,71 @@ load_config(struct ctx *ctx)
 			}
 		}
 
-		/* OK, good to add now. */
-		pp = malloc(sizeof(*pp));
-		if (pp == NULL) {
-			free_config(ctx);
-			return -1;
+		if (ifp != NULL) {
+			if (ifp->prefixes == NULL)
+				ifp->prefixes = lpm_create();
+			prefixes = ifp->prefixes;
+		} else {
+			if (ctx->prefixes == NULL)
+				ctx->prefixes = lpm_create();
+			prefixes = ctx->prefixes;
 		}
+		if (prefixes == NULL) {
+			syslog(LOG_ERR, "lpm_create: %m");
+			goto err;
+		}
+
+		/* Check if we have already added the prefix,
+		 * overwrite it if we have. */
+		pp = lpm_lookup_prefix(prefixes, &ina.s_addr,
+		    sizeof(ina.s_addr), (unsigned int)plen);
+		if (pp == NULL) {
+			pp = malloc(sizeof(*pp));
+			if (pp == NULL)
+				goto err;
+			pp->ip = ina.s_addr;
+			pp->plen = (unsigned int)plen;
+			if (lpm_insert(prefixes, &pp->ip, sizeof(pp->ip),
+			    pp->plen, pp) == -1)
+			{
+				syslog(LOG_ERR, "lpm_insert: %m");
+				free(pp);
+				goto err;
+			}
+		}
+
 		pp->action = act;
-		pp->ip = ina.s_addr & net;
-		pp->net = net;
 		if (hwaddr == NULL)
 			pp->hwlen = 0;
 		else
 			pp->hwlen = hwaddr_aton(pp->hwaddr, hwaddr);
-		pents = ifp != NULL ? &ifp->pents : &ctx->pents;
-		TAILQ_INSERT_TAIL(pents, pp, next);
 	}
+
+	error = 0;
+
+err:
 	fclose(f);
 	free(buf);
-	return 0;
-}
-
-static inline bool
-pent_matches(const struct pent *pent, in_addr_t ip) {
-	return pent->ip == (ip & pent->net);
+	return error;
 }
 
 static int
 proxy(struct ctx *ctx, struct interface *ifp, in_addr_t ip,
     const uint8_t **hw, size_t *hwlen)
 {
-	struct pent *pp;
+	struct prefix *pp;
 
 	if (load_config(ctx) == -1)
 		return -1;
 
-	/* Process rules backwards so that we match hosts before subnets */
-	TAILQ_FOREACH_REVERSE(pp, &ifp->pents, pent_head, next) {
-		if (pent_matches(pp, ip))
-			break;
-	}
-	if (pp == NULL) {
-		TAILQ_FOREACH_REVERSE(pp, &ctx->pents, pent_head, next) {
-			if (pent_matches(pp, ip))
-				break;
-		}
-		if (pp == NULL)
-			return PARPD_IGNORE;
-	}
+	if (ifp->prefixes != NULL)
+		pp = lpm_lookup(ifp->prefixes, &ip, sizeof(ip));
+	else
+		pp = NULL;
+	if (pp == NULL && ctx->prefixes != NULL)
+		pp = lpm_lookup(ctx->prefixes, &ip, sizeof(ip));
+	if (pp == NULL)
+		return PARPD_IGNORE;
 
 	if (pp->action) {
 		*hw = pp->hwaddr;
@@ -635,7 +663,6 @@ discover_interfaces(struct ctx *ctx, int argc, char * const *argv)
 			memcpy(ifp->hwaddr, sll->sll_addr, ifp->hwlen);
 #endif
 
-		TAILQ_INIT(&ifp->pents);
 		rb_tree_init(&ifp->ipaddrs, &ip_compare_ops);
 
 		/* Some systems have more than one AF_LINK.
@@ -671,11 +698,10 @@ int
 main(int argc, char **argv)
 {
 	struct ctx ctx = { .cffile = PARPD_CONF };
-	struct interface *ifp, *pifp;
+	struct interface *ifp;
 	int opt, fflag = 0, i;
 	struct eloop *eloop;
 	sigset_t sigset;
-	bool have_pents = false;
 
 	opt = EXIT_FAILURE;
 	openlog("parpd", LOG_PERROR, LOG_DAEMON);
@@ -721,7 +747,6 @@ main(int argc, char **argv)
 	opt = EXIT_FAILURE;
 
 	rb_tree_init(&ctx.ifaces, &if_compare_ops);
-	TAILQ_INIT(&ctx.pents);
 
 	discover_interfaces(&ctx, argc, argv);
 	for (i = 0; i < argc; i++) {
@@ -744,14 +769,9 @@ main(int argc, char **argv)
 		goto out;
 	}
 
-	have_pents = (TAILQ_FIRST(&ctx.pents) != NULL);
-	pifp = NULL;
+	i = 0;
 	RB_TREE_FOREACH(ifp, &ctx.ifaces) {
-		bool if_have_pents = (TAILQ_FIRST(&ifp->pents) != NULL);
-
-		if (if_have_pents)
-			pifp = ifp;
-		if (!if_have_pents && !have_pents)
+		if (ctx.prefixes == NULL && ifp->prefixes == NULL)
 			continue;
 
 		if ((ifp->fd = bpf_open_arp(ifp)) == -1) {
@@ -761,9 +781,10 @@ main(int argc, char **argv)
 
 		syslog(LOG_DEBUG, "proxying on %s", ifp->ifname);
 		eloop_event_add(eloop, ifp->fd, ELE_READ, handle_arp, ifp);
+		i = 1;
 	}
-	if (pifp == NULL && !have_pents) {
-		syslog(LOG_ERR, "%s: no valid entries", ctx.cffile);
+	if (i == 0) {
+		syslog(LOG_ERR, "%s: nothing todo", ctx.cffile);
 		goto out;
 	}
 

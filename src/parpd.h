@@ -36,9 +36,7 @@
 #include <sys/rbtree.h>
 #endif
 
-#ifdef HAVE_SYS_QUEUE_H
-#include <sys/queue.h>
-#endif
+#include <lpm.h>
 
 #define	VERSION			"2.1.1"
 #define	PARPD_CONF		SYSCONFDIR "/parpd.conf"
@@ -64,15 +62,13 @@ struct ipaddr {
 	size_t nannounced;
 };
 
-struct pent {
-	TAILQ_ENTRY(pent) next;
+struct prefix {
 	char action;
 	in_addr_t ip;
-	in_addr_t net;
+	unsigned int plen;
 	uint8_t hwaddr[HWADDR_LEN];
 	size_t hwlen;
 };
-TAILQ_HEAD (pent_head, pent);
 
 struct interface
 {
@@ -85,7 +81,7 @@ struct interface
 	int fd;
 	size_t buffer_size, buffer_len, buffer_pos;
 	unsigned char *buffer;
-	struct pent_head pents;
+	lpm_t *prefixes;
 	rb_tree_t ipaddrs;
 };
 
@@ -93,8 +89,8 @@ struct ctx {
 	struct eloop *eloop;
 	const char *cffile;
 	time_t config_mtime;
+	lpm_t *prefixes;
 	rb_tree_t ifaces;
-	struct pent_head pents;
 };
 
 int bpf_open_arp(struct interface *);

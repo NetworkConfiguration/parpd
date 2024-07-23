@@ -654,6 +654,34 @@ pselect)
 	;;
 esac
 
+printf "Testing for lpm_create ... "
+cat <<EOF >_lpm.c
+#include <stddef.h>
+#include <lpm.h>
+int main(void) {
+	lpm_t *lpm = lpm_create();
+	return lpm ? 0 : -1;
+}
+EOF
+if $XCC _lpm.c -o _lpm -Wl,-lpm 2>&3; then
+	HAVE_LIBLPM="yes"
+elif $XCC _lpm.c -o _lpm -I/usr/pkg/include -L/usr/pkg/lib -Wl,-llpm 2>&3; then
+	HAVE_LIBLPM="yes (/usr/pkg)"
+	echo "CPPFLAGS+=	-I/usr/pkg/include" >>$CONFIG_MK
+	echo "LDFLAGS+=		-L/usr/pkg/lib -llpm" >>$CONFIG_MK
+elif $XCC _lpm.c -o _lpm -I/usr/local/include -L/usr/local/lib -Wl,-llpm 2>&3; then
+	HAVE_LIBLPM="yes (/usr/local)"
+	echo "CPPFLAGS+=	-I/usr/local/include" >>$CONFIG_MK
+	echo "LDFLAGS+=		-L/usr/local/lib -llpm" >>$CONFIG_MK
+else
+	HAVE_LIBLPM=no
+fi
+echo "$HAVE_LIBLPM"
+rm -f _lpm.c _lpm
+if [ "$HAVE_LIBLPM" = no ]; then
+	exit 1
+fi
+
 echo
 echo "   SYSCONFDIR =		$SYSCONFDIR"
 echo "   SBINDIR =		$SBINDIR"

@@ -22,7 +22,7 @@
 .\" OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
 .\" SUCH DAMAGE.
 .\"
-.Dd July 16, 2024
+.Dd July 23, 2024
 .Dt PARPD.CONF 5
 .Os
 .Sh NAME
@@ -35,8 +35,7 @@ file maps a range of inet addresses to be replied to by
 .Xr parpd 8 .
 Lines consist of a command, an inet address and an option Ethernet address
 to respond with.
-Subsequent rules override prior rules,
-so add specific host commands after the subnet command it lives in.
+Subsequent rules override prior rules.
 A
 .Sq \&#
 character indicates the beginning of a comment;

@@ -33,8 +33,9 @@ ignore 192.168.0.8
 
 # This one is more interesting - it tells parpd to proxy all ARP requests
 # except for a specific subnet.
-proxy 0.0.0.0
+proxy 0.0.0.0/0
 ignore 10.0.0.0/24
 ```
 
 parpd uses the [Longest Prefix Match library](https://github.com/rmind/liblpm)
+to allow really large rules and remain performant.

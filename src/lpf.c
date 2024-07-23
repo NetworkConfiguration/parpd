@@ -1,6 +1,6 @@
 /*
  * parpd: Linux Packet Filter
- * Copyright (c) 2008-2023 Roy Marples <roy@marples.name>
+ * Copyright (c) 2008-2024 Roy Marples <roy@marples.name>
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions

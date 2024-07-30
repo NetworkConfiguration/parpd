@@ -25,7 +25,7 @@
  * SUCH DAMAGE.
  */
 
-const char copyright[] = "Copyright (c) 2008-2017 Roy Marples";
+const char copyright[] = "Copyright (c) 2008-2024 Roy Marples";
 
 #include <sys/ioctl.h>
 #include <sys/param.h>

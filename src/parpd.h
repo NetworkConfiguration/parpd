@@ -46,7 +46,7 @@
 
 #include <lpm.h>
 
-#define	VERSION			"2.2"
+#define	VERSION			"2.2.0"
 #define	PARPD_CONF		SYSCONFDIR "/parpd.conf"
 
 #define	HWADDR_LEN		20

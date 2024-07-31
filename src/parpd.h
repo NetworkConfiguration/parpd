@@ -32,8 +32,16 @@
 
 #include "config.h"
 
-#ifdef HAVE_SYS_RBTREE_H
-#include <sys/rbtree.h>
+#ifndef TAILQ_FOREACH
+#ifdef HAVE_SYS_QUEUE_H
+#include <sys/queue.h>
+#elif defined(QUEUE_H)
+#define __QUEUE_HEADER(x) #x
+#define _QUEUE_HEADER(x) __QUEUE_HEADER(x)
+#include _QUEUE_HEADER(QUEUE_H)
+#else
+#include "queue.h"
+#endif
 #endif
 
 #include <lpm.h>
@@ -56,11 +64,22 @@
 #define	ATTACK_EXPIRE		(ANNOUNCE_NUM * ANNOUNCE_INTERVAL) + 1
 
 struct ipaddr {
-	rb_node_t rbtree;
 	struct interface *ifp;
 	in_addr_t ipaddr;
 	size_t nannounced;
 };
+typedef struct ipaddr ipaddr_t;
+
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wcast-align"
+#pragma GCC diagnostic ignored "-Wcast-qual"
+#pragma GCC diagnostic ignored "-Wconversion"
+#pragma GCC diagnostic ignored "-Wsign-conversion"
+#define NAME ipaddr_map
+#define KEY_TY in_addr_t
+#define VAL_TY ipaddr_t *
+#include "verstable.h"
+#pragma GCC diagnostic pop
 
 struct prefix {
 	char action;
@@ -70,9 +89,11 @@ struct prefix {
 	size_t hwlen;
 };
 
+/* interfaces are stored in a TAILQ list, which is fine
+ * because the interface list is only used at startup and finish. */
 struct interface
 {
-	rb_node_t rbtree;
+	TAILQ_ENTRY(interface) next;
 	struct ctx *ctx;
 	char ifname[IF_NAMESIZE];
 	sa_family_t family;
@@ -82,7 +103,7 @@ struct interface
 	size_t buffer_size, buffer_len, buffer_pos;
 	unsigned char *buffer;
 	lpm_t *prefixes;
-	rb_tree_t ipaddrs;
+	ipaddr_map ipaddrs;
 };
 
 struct ctx {
@@ -90,7 +111,7 @@ struct ctx {
 	const char *cffile;
 	time_t config_mtime;
 	lpm_t *prefixes;
-	rb_tree_t ifaces;
+	TAILQ_HEAD (interface_head, interface) ifaces;
 };
 
 int bpf_open_arp(struct interface *);

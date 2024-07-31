@@ -14,7 +14,7 @@ Each line compromises of two or three words:
 
 Here are some examples:
 
-```
+```sh
 # parpd.conf example
 
 # These two do the same thing
@@ -28,7 +28,7 @@ proxy 192.168.0.5 aa:bb:cc:dd:ee:ff
 ignore 192.168.0.8
 ```
 
-```
+```sh
 # another parpd.conf example
 
 # This one is more interesting - it tells parpd to proxy all ARP requests
@@ -37,5 +37,12 @@ proxy 0.0.0.0/0
 ignore 10.0.0.0/24
 ```
 
+```sh
+# attack example, useful for testing IPv4 Address Conflict Resolution
+attack 169.254.0.0/16
+```
+
 parpd uses the [Longest Prefix Match library](https://github.com/rmind/liblpm)
-to allow really large rules and remain performant.
+and [Verstable](https://github.com/JacksonAllan/Verstable) to manage
+large rulesets and addresses so it remains performant in the most challenging
+of networks.

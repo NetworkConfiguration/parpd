@@ -30,42 +30,13 @@
 #define COMMON_H
 
 #if __GNUC__ > 2 || defined(__INTEL_COMPILER)
-# ifndef __packed
-#  define __packed __attribute__((__packed__))
-# endif
 # ifndef __unused
 #  define __unused __attribute__((__unused__))
 # endif
 #else
-# ifndef __packed
-#  define __packed
-# endif
 # ifndef __unused
 #  define __unused
 # endif
 #endif
-
-/* Needed for rbtree(3) compat */
-#ifndef __RCSID
-#define __RCSID(a)
-#endif
-#ifndef __predict_false
-# if __GNUC__ > 2
-#  define	__predict_true(exp)	__builtin_expect((exp) != 0, 1)
-#  define	__predict_false(exp)	__builtin_expect((exp) != 0, 0)
-#else
-#  define	__predict_true(exp)	(exp)
-#  define	__predict_false(exp)	(exp)
-# endif
-#endif
-#ifndef __BEGIN_DECLS
-# if defined(__cplusplus)
-#  define	__BEGIN_DECLS		extern "C" {
-#  define	__END_DECLS		};
-# else /* __BEGIN_DECLS */
-#  define	__BEGIN_DECLS
-#  define	__END_DECLS
-# endif /* __BEGIN_DECLS */
-#endif /* __BEGIN_DECLS */
 
 #endif

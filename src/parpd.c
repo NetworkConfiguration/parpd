@@ -131,37 +131,6 @@ hwaddr_ntoa(const unsigned char *hwaddr, size_t hwlen)
 	return hwaddr_buffer;
 }
 
-static int
-if_compare(__unused void *context, const void *node1, const void *node2)
-{
-	const struct interface *if1 = node1, *if2 = node2;
-
-	return strcmp(if1->ifname, if2->ifname);
-}
-
-static const rb_tree_ops_t if_compare_ops = {
-	.rbto_compare_nodes = if_compare,
-	.rbto_compare_key = if_compare,
-	.rbto_node_offset = offsetof(struct interface, rbtree),
-	.rbto_context = NULL
-};
-
-static int
-ip_compare(__unused void *context, const void *node1, const void *node2)
-{
-	const struct ipaddr *ip1 = node1, *ip2 = node2;
-
-	return (int)(ip1->ipaddr - ip2->ipaddr);
-}
-
-static const rb_tree_ops_t ip_compare_ops = {
-	.rbto_compare_nodes = ip_compare,
-	.rbto_compare_key = ip_compare,
-	.rbto_node_offset = offsetof(struct ipaddr, rbtree),
-	.rbto_context = NULL
-};
-
-
 /* Because fgetln does not return C strings, we cannot use
  * functions such as strsep and friends to extract words.
  * This is no bad thing this below code handles extracting words
@@ -215,7 +184,7 @@ free_config(struct ctx *ctx)
 	struct interface *ifp;
 
 	free_prefixes(&ctx->prefixes);
-	RB_TREE_FOREACH(ifp, &ctx->ifaces) {
+	TAILQ_FOREACH(ifp, &ctx->ifaces, next) {
 		free_prefixes(&ifp->prefixes);
 	}
 }
@@ -271,10 +240,10 @@ load_config(struct ctx *ctx)
 		else if (strcmp(cmd, "ignore") == 0)
 			act = PARPD_IGNORE;
 		else if (strcmp(cmd, "interface") == 0) {
-			struct interface iff = { .fd = -1 };
-
-			strlcpy(iff.ifname, match, sizeof(iff.ifname));
-			ifp = rb_tree_find_node(&ctx->ifaces, &iff);
+			TAILQ_FOREACH(ifp, &ctx->ifaces, next) {
+				if (strcmp(ifp->ifname, match) == 0)
+					break;
+			}
 			if (ifp == NULL)
 				syslog(LOG_ERR,
 				    "%s: unknown interface", match);
@@ -449,7 +418,7 @@ expire_ipaddr(void *arg)
 {
 	struct ipaddr *ipa = arg;
 
-	rb_tree_remove_node(&ipa->ifp->ipaddrs, ipa);
+	ipaddr_map_erase(&ipa->ifp->ipaddrs, ipa->ipaddr);
 	free(ipa);
 }
 
@@ -468,6 +437,7 @@ handle_arp(void *arg, unsigned short events)
 	struct in_addr ina;
 	int action;
 	struct ipaddr *ipa;
+	ipaddr_map_itr itr;
 
 	if (events != ELE_READ)
 		syslog(LOG_ERR, "%s: unexpected event 0x%04x",
@@ -522,22 +492,25 @@ handle_arp(void *arg, unsigned short events)
 			continue;
 
 		if (action == PARPD_ATTACK) {
-			struct ipaddr ipf = { .ipaddr = sip };
-
 			/* Only attack announcements. */
 			if (tip != sip)
 				continue;
 
-			ipa = rb_tree_find_node(&ifp->ipaddrs, &ipf);
+			ipa = calloc(1, sizeof(*ipa));
 			if (ipa == NULL) {
-				ipa = calloc(1, sizeof(*ipa));
-				if (ipa == NULL) {
-					syslog(LOG_ERR, "calloc: %m");
-					continue;
-				}
-				ipa->ifp = ifp;
-				ipa->ipaddr = sip;
-				rb_tree_insert_node(&ifp->ipaddrs, ipa);
+				syslog(LOG_ERR, "calloc: %m");
+				continue;
+			}
+			ipa->ifp = ifp;
+			ipa->ipaddr = sip;
+			itr = ipaddr_map_get_or_insert(&ifp->ipaddrs,
+			    ipa->ipaddr, ipa);
+			if (ipaddr_map_is_end(itr)) {
+				syslog(LOG_ERR, "ipaddr_insert: %m");
+				continue;
+			} else if (itr.data->val != ipa) {
+				free(ipa);
+				ipa = itr.data->val;
 			}
 
 			/* Expire the entry if no follow-up. */
@@ -602,7 +575,7 @@ discover_interfaces(struct ctx *ctx, int argc, char * const *argv)
 {
 	struct ifaddrs *ifaddrs, *ifa;
 	int s, i;
-	struct interface *ifp, *ifs;
+	struct interface *ifp;
 #ifdef AF_LINK
 	const struct sockaddr_dl *sdl;
 #elif AF_PACKET
@@ -630,6 +603,15 @@ discover_interfaces(struct ctx *ctx, int argc, char * const *argv)
 			if (i == argc)
 				continue;
 		}
+
+		/* Some systems have more than one AF_LINK.
+		 * The first one returned is the active one. */
+		TAILQ_FOREACH(ifp, &ctx->ifaces, next) {
+			if (strcmp(ifp->ifname, ifa->ifa_name) == 0)
+				break;
+		}
+		if (ifp != NULL)
+			continue;
 
 		ifp = calloc(1, sizeof(*ifp));
 		if (ifp == NULL) {
@@ -663,15 +645,9 @@ discover_interfaces(struct ctx *ctx, int argc, char * const *argv)
 			memcpy(ifp->hwaddr, sll->sll_addr, ifp->hwlen);
 #endif
 
-		rb_tree_init(&ifp->ipaddrs, &ip_compare_ops);
+		vt_init(&ifp->ipaddrs);
 
-		/* Some systems have more than one AF_LINK.
-		 * The first one returned is the active one. */
-		ifs = rb_tree_insert_node(&ctx->ifaces, ifp);
-		if (ifs != ifp) {
-			free(ifp);
-			continue;
-		}
+		TAILQ_INSERT_TAIL(&ctx->ifaces, ifp, next);
 	}
 	freeifaddrs(ifaddrs);
 	close(s);
@@ -746,20 +722,20 @@ main(int argc, char **argv)
 
 	opt = EXIT_FAILURE;
 
-	rb_tree_init(&ctx.ifaces, &if_compare_ops);
-
+	TAILQ_INIT(&ctx.ifaces);
 	discover_interfaces(&ctx, argc, argv);
-	for (i = 0; i < argc; i++) {
-		struct interface iff = { .fd = -1 };
 
-		strlcpy(iff.ifname, argv[i], sizeof(iff.ifname));
-		ifp = rb_tree_find_node(&ctx.ifaces, &iff);
+	for (i = 0; i < argc; i++) {
+		TAILQ_FOREACH(ifp, &ctx.ifaces, next) {
+			if (strcmp(ifp->ifname, argv[i]) == 0)
+				break;
+		}
 		if (ifp == NULL) {
 			syslog(LOG_ERR, "%s: no such interface", argv[i]);
 			goto out;
 		}
 	}
-	if (RB_TREE_MIN(&ctx.ifaces) == NULL) {
+	if (TAILQ_FIRST(&ctx.ifaces) == NULL) {
 		syslog(LOG_ERR, "no suitable interfaces found");
 		goto out;
 	}
@@ -770,7 +746,7 @@ main(int argc, char **argv)
 	}
 
 	i = 0;
-	RB_TREE_FOREACH(ifp, &ctx.ifaces) {
+	TAILQ_FOREACH(ifp, &ctx.ifaces, next) {
 		if (ctx.prefixes == NULL && ifp->prefixes == NULL)
 			continue;
 
@@ -804,19 +780,26 @@ main(int argc, char **argv)
 	opt = eloop_start(eloop, &sigset);
 
 out:
+#ifdef SANITIZE_MEMORY
 	free_config(&ctx);
-	while ((ifp = RB_TREE_MIN(&ctx.ifaces)) != NULL) {
-		struct ipaddr *ipa;
+	while ((ifp = TAILQ_FIRST(&ctx.ifaces)) != NULL) {
+		ipaddr_map_itr itr;
 
-		rb_tree_remove_node(&ctx.ifaces, ifp);
-		while ((ipa = RB_TREE_MIN(&ifp->ipaddrs)) != NULL) {
-			rb_tree_remove_node(&ifp->ipaddrs, ipa);
-			free(ipa);
+		TAILQ_REMOVE(&ctx.ifaces, ifp, next);
+		for (itr = ipaddr_map_first(&ifp->ipaddrs);
+		    !ipaddr_map_is_end(itr);
+		    itr = ipaddr_map_next(itr))
+		{
+			free(itr.data->val);
 		}
+		if (ifp->fd != -1)
+			close(ifp->fd);
 		free(ifp->buffer);
 		free(ifp);
 	}
 
 	eloop_free(eloop);
+#endif
+
 	return opt;
 }

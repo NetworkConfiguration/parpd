@@ -5,7 +5,6 @@ echo "configure args: $*"
 exec 3>config.log
 
 # Ensure that we do not inherit these from env
-RBTREE=
 OS=
 BUILD=
 HOST=
@@ -277,6 +276,7 @@ fi
 if [ -n "$DEBUG" -a "$DEBUG" != no -a "$DEBUG" != false ]; then
 	echo "Adding debugging CFLAGS"
 	cat <<EOF >>$CONFIG_MK
+CPPFLAGS+=	-DSANITIZE_MEMORY
 CFLAGS+=	-g -Wall -Wextra
 CFLAGS+=	-Wmissing-prototypes -Wmissing-declarations
 CFLAGS+=	-Wmissing-format-attribute -Wnested-externs
@@ -522,33 +522,6 @@ else
 	echo "#define	HAVE_SYS_QUEUE_H" >>$CONFIG_H
 fi
 
-if [ -z "$RBTREE" ]; then
-	printf "Testing for rb_tree_init ... "
-	cat <<EOF >_rbtree.c
-#include <sys/rbtree.h>
-static rb_tree_ops_t ops;
-int main(void) {
-	rb_tree_t tree;
-	rb_tree_init(&tree, &ops);
-	return 0;
-}
-EOF
-	if $XCC _rbtree.c -o _rbtree 2>&3; then
-		RBTREE=yes
-	else
-		RBTREE=no
-	fi
-	echo "$RBTREE"
-	rm -f _rbtree.c _rbtree
-fi
-if [ "$RBTREE" = no ]; then
-	echo "#define	RBTEST" >>$CONFIG_H
-	echo "COMPAT_SRCS+=	compat/rb.c" >>$CONFIG_MK
-	echo "#include			\"compat/rbtree.h\"" >>$CONFIG_H
-else
-	echo "#define	HAVE_SYS_RBTREE_H" >>$CONFIG_H
-fi
-
 if [ -z "$POLL" ]; then
 	printf "Testing for kqueue1 ... "
 	cat <<EOF >_kqueue.c
@@ -668,11 +641,11 @@ if $XCC _lpm.c -o _lpm -Wl,-lpm 2>&3; then
 elif $XCC _lpm.c -o _lpm -I/usr/pkg/include -L/usr/pkg/lib -Wl,-llpm 2>&3; then
 	HAVE_LIBLPM="yes (/usr/pkg)"
 	echo "CPPFLAGS+=	-I/usr/pkg/include" >>$CONFIG_MK
-	echo "LDFLAGS+=		-L/usr/pkg/lib -llpm" >>$CONFIG_MK
+	echo "LDFLAGS+=	-L/usr/pkg/lib -llpm" >>$CONFIG_MK
 elif $XCC _lpm.c -o _lpm -I/usr/local/include -L/usr/local/lib -Wl,-llpm 2>&3; then
 	HAVE_LIBLPM="yes (/usr/local)"
 	echo "CPPFLAGS+=	-I/usr/local/include" >>$CONFIG_MK
-	echo "LDFLAGS+=		-L/usr/local/lib -llpm" >>$CONFIG_MK
+	echo "LDFLAGS+=	-L/usr/local/lib -llpm" >>$CONFIG_MK
 else
 	HAVE_LIBLPM=no
 fi

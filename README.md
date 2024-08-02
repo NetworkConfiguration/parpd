@@ -42,7 +42,6 @@ ignore 10.0.0.0/24
 attack 169.254.0.0/16
 ```
 
-parpd uses the [Longest Prefix Match library](https://github.com/rmind/liblpm)
-and [Verstable](https://github.com/JacksonAllan/Verstable) to manage
+parpd [Verstable](https://github.com/JacksonAllan/Verstable) to manage
 large rulesets and addresses so it remains performant in the most challenging
 of networks.

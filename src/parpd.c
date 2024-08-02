@@ -131,6 +131,20 @@ hwaddr_ntoa(const unsigned char *hwaddr, size_t hwlen)
 	return hwaddr_buffer;
 }
 
+static void
+in_len2mask(in_addr_t *mask, unsigned int len)
+{
+	unsigned int i;
+	uint8_t *p;
+
+	p = (uint8_t *)mask;
+	memset(mask, 0, sizeof(*mask));
+	for (i = 0; i < len / 8; i++)
+		p[i] = 0xff;
+	if (len % 8)
+		p[i] = (uint8_t)((0xff00 >> (len % 8)) & 0xff);
+}
+
 /* Because fgetln does not return C strings, we cannot use
  * functions such as strsep and friends to extract words.
  * This is no bad thing this below code handles extracting words
@@ -160,22 +174,98 @@ get_word(char **s, const char *e)
 }
 
 static void
-free_prefix(__unused void *arg, __unused const void *key, __unused size_t len,
-    void *val)
-{
+pm_init(pstore_t *store) {
+	unsigned int plen;
+	pbucket_t *bucket;
 
-	free(val);
+	for (plen = 0; plen <= PREFIX_MAX_LEN; plen++) {
+		bucket = &store->buckets[plen];
+		bucket->plen = plen;
+		in_len2mask(&bucket->mask, bucket->plen);
+		bucket->set = false;
+		paction_map_init(&bucket->prefixes);
+	}
 }
 
-static void free_prefixes(lpm_t **prefixes)
+static void
+pm_cleanup(pstore_t *store)
 {
+	unsigned int plen;
+	pbucket_t *bucket;
 
-	if (*prefixes == NULL)
-		return;
+	for (plen = 0; plen <= PREFIX_MAX_LEN; plen++) {
+		bucket = &store->buckets[plen];
+		paction_map_cleanup(&bucket->prefixes);
+		bucket->set = false;
+	}
+}
 
-	lpm_clear(*prefixes, free_prefix, NULL);
-	free(*prefixes);
-	*prefixes = NULL;
+static bool
+pm_anyset(pstore_t *store)
+{
+	unsigned int plen;
+
+	for (plen = 0; plen < PREFIX_MAX_LEN; plen++) {
+		if (store->buckets[plen].set)
+			return true;
+	}
+	return false;
+}
+
+static paction_t *
+pm_get(pstore_t *store, in_addr_t ip, unsigned int plen)
+{
+	pbucket_t *bucket;
+	paction_map_itr itr;
+
+	bucket = &store->buckets[plen];
+	if (!bucket->set)
+		return NULL;
+
+	itr = paction_map_get(&bucket->prefixes, ip);
+	if (paction_map_is_end(itr))
+		return NULL;
+
+	return itr.data->val;
+}
+
+static paction_t *
+pm_lookup(pstore_t *store, in_addr_t ip)
+{
+	paction_map_itr itr;
+	int plen = PREFIX_MAX_LEN;
+	pbucket_t *bucket;
+	in_addr_t addr;
+
+	for (plen = PREFIX_MAX_LEN; plen >= 0; plen--) {
+		bucket = &store->buckets[plen];
+		if (!bucket->set) {
+			continue;
+		}
+
+		addr = ip & bucket->mask;
+		itr = paction_map_get(&bucket->prefixes, addr);
+		if (!paction_map_is_end(itr))
+			return itr.data->val;
+	}
+
+	return NULL;
+}
+
+static int
+pm_insert(pstore_t *store, in_addr_t ip, unsigned int plen, paction_t *pa)
+{
+	pbucket_t *bucket;
+	paction_map_itr itr;
+
+	bucket = &store->buckets[plen];
+	ip &= bucket->mask;
+	itr = paction_map_insert(&store->buckets[plen].prefixes, ip, pa);
+	if (paction_map_is_end(itr))
+		return -1;
+
+	bucket->set = true;
+	return 0;
 }
 
 static void
@@ -183,9 +273,9 @@ free_config(struct ctx *ctx)
 {
 	struct interface *ifp;
 
-	free_prefixes(&ctx->prefixes);
+	pm_cleanup(&ctx->pstore);
 	TAILQ_FOREACH(ifp, &ctx->ifaces, next) {
-		free_prefixes(&ifp->prefixes);
+		pm_cleanup(&ifp->pstore);
 	}
 }
 
@@ -198,12 +288,12 @@ load_config(struct ctx *ctx)
 	char *buf, *cmd, *match, *hwaddr, *bp, *p, *e, *r, act;
 	size_t buf_len;
 	ssize_t len;
-	struct prefix *pp;
 	long plen;
 	int in_interface;
 	struct in_addr ina;
 	struct interface *ifp;
-	lpm_t *prefixes;
+	paction_t *pa;
+	pstore_t *pstore;
 
 	if (stat(ctx->cffile, &st) == -1) {
 		free_config(ctx);
@@ -308,45 +398,30 @@ load_config(struct ctx *ctx)
 				}
 			}
 		}
-
-		if (ifp != NULL) {
-			if (ifp->prefixes == NULL)
-				ifp->prefixes = lpm_create();
-			prefixes = ifp->prefixes;
-		} else {
-			if (ctx->prefixes == NULL)
-				ctx->prefixes = lpm_create();
-			prefixes = ctx->prefixes;
-		}
-		if (prefixes == NULL) {
-			syslog(LOG_ERR, "lpm_create: %m");
-			goto err;
-		}
+		pstore = ifp != NULL ? &ifp->pstore : &ctx->pstore;
 
 		/* Check if we have already added the prefix,
 		 * overwrite it if we have. */
-		pp = lpm_lookup_prefix(prefixes, &ina.s_addr,
-		    sizeof(ina.s_addr), (unsigned int)plen);
-		if (pp == NULL) {
-			pp = malloc(sizeof(*pp));
-			if (pp == NULL)
+		pa = pm_get(pstore, ina.s_addr, (unsigned int)plen);
+		if (pa == NULL) {
+			pa = malloc(sizeof(*pa));
+			if (pa == NULL)
 				goto err;
-			pp->ip = ina.s_addr;
-			pp->plen = (unsigned int)plen;
-			if (lpm_insert(prefixes, &pp->ip, sizeof(pp->ip),
-			    pp->plen, pp) == -1)
+			pa->ip = ina.s_addr;
+			pa->plen = (unsigned int)plen;
+			if (pm_insert(pstore, pa->ip, pa->plen, pa) == -1)
 			{
-				syslog(LOG_ERR, "lpm_insert: %m");
-				free(pp);
+				syslog(LOG_ERR, "pm_insert: %m");
+				free(pa);
 				goto err;
 			}
 		}
 
-		pp->action = act;
+		pa->action = act;
 		if (hwaddr == NULL)
-			pp->hwlen = 0;
+			pa->hwlen = 0;
 		else
-			pp->hwlen = hwaddr_aton(pp->hwaddr, hwaddr);
+			pa->hwlen = hwaddr_aton(pa->hwaddr, hwaddr);
 	}
 
 	error = 0;
@@ -361,25 +436,22 @@ static int
 proxy(struct ctx *ctx, struct interface *ifp, in_addr_t ip,
     const uint8_t **hw, size_t *hwlen)
 {
-	struct prefix *pp;
+	paction_t *pa;
 
 	if (load_config(ctx) == -1)
 		return -1;
 
-	if (ifp->prefixes != NULL)
-		pp = lpm_lookup(ifp->prefixes, &ip, sizeof(ip));
-	else
-		pp = NULL;
-	if (pp == NULL && ctx->prefixes != NULL)
-		pp = lpm_lookup(ctx->prefixes, &ip, sizeof(ip));
-	if (pp == NULL)
+	pa = pm_lookup(&ifp->pstore, ip);
+	if (pa == NULL)
+		pa = pm_lookup(&ctx->pstore, ip);
+	if (pa == NULL)
 		return PARPD_IGNORE;
 
-	if (pp->action) {
-		*hw = pp->hwaddr;
-		*hwlen = pp->hwlen;
+	if (pa->action) {
+		*hw = pa->hwaddr;
+		*hwlen = pa->hwlen;
 	}
-	return pp->action;
+	return pa->action;
 }
 
 #define ARP_LEN								      \
@@ -419,7 +491,6 @@ expire_ipaddr(void *arg)
 	struct ipaddr *ipa = arg;
 
 	ipaddr_map_erase(&ipa->ifp->ipaddrs, ipa->ipaddr);
-	free(ipa);
 }
 
 /* Checks an incoming ARP message to see if we should proxy for it. */
@@ -645,6 +716,7 @@ discover_interfaces(struct ctx *ctx, int argc, char * const *argv)
 			memcpy(ifp->hwaddr, sll->sll_addr, ifp->hwlen);
 #endif
 
+		pm_init(&ifp->pstore);
 		vt_init(&ifp->ipaddrs);
 
 		TAILQ_INSERT_TAIL(&ctx->ifaces, ifp, next);
@@ -722,6 +794,7 @@ main(int argc, char **argv)
 
 	opt = EXIT_FAILURE;
 
+	pm_init(&ctx.pstore);
 	TAILQ_INIT(&ctx.ifaces);
 	discover_interfaces(&ctx, argc, argv);
 
@@ -747,7 +820,7 @@ main(int argc, char **argv)
 
 	i = 0;
 	TAILQ_FOREACH(ifp, &ctx.ifaces, next) {
-		if (ctx.prefixes == NULL && ifp->prefixes == NULL)
+		if (!pm_anyset(&ctx.pstore) && !pm_anyset(&ifp->pstore))
 			continue;
 
 		if ((ifp->fd = bpf_open_arp(ifp)) == -1) {
@@ -783,15 +856,8 @@ out:
 #ifdef SANITIZE_MEMORY
 	free_config(&ctx);
 	while ((ifp = TAILQ_FIRST(&ctx.ifaces)) != NULL) {
-		ipaddr_map_itr itr;
-
 		TAILQ_REMOVE(&ctx.ifaces, ifp, next);
-		for (itr = ipaddr_map_first(&ifp->ipaddrs);
-		    !ipaddr_map_is_end(itr);
-		    itr = ipaddr_map_next(itr))
-		{
-			free(itr.data->val);
-		}
+		ipaddr_map_cleanup(&ifp->ipaddrs);
 		if (ifp->fd != -1)
 			close(ifp->fd);
 		free(ifp->buffer);

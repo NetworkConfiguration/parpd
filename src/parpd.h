@@ -44,9 +44,7 @@
 #endif
 #endif
 
-#include <lpm.h>
-
-#define	VERSION			"2.2.0"
+#define	VERSION			"2.3.0"
 #define	PARPD_CONF		SYSCONFDIR "/parpd.conf"
 
 #define	HWADDR_LEN		20
@@ -63,6 +61,10 @@
 /* Expire addresses to attack in a timely manner. */
 #define	ATTACK_EXPIRE		(ANNOUNCE_NUM * ANNOUNCE_INTERVAL) + 1
 
+/* IPv4 only */
+#define PREFIX_MAX_LEN		32
+
+/* IP address */
 struct ipaddr {
 	struct interface *ifp;
 	in_addr_t ipaddr;
@@ -70,24 +72,49 @@ struct ipaddr {
 };
 typedef struct ipaddr ipaddr_t;
 
+/* Prefix Action definition */
+struct paction {
+	in_addr_t ip;
+	unsigned int plen;
+	char action;
+	uint8_t hwaddr[HWADDR_LEN];
+	size_t hwlen;
+};
+typedef struct paction paction_t;
+
 #pragma GCC diagnostic push
 #pragma GCC diagnostic ignored "-Wcast-align"
 #pragma GCC diagnostic ignored "-Wcast-qual"
 #pragma GCC diagnostic ignored "-Wconversion"
 #pragma GCC diagnostic ignored "-Wsign-conversion"
+
 #define NAME ipaddr_map
 #define KEY_TY in_addr_t
 #define VAL_TY ipaddr_t *
+#define VAL_DTOR_FN free
 #include "verstable.h"
+
+#define NAME paction_map
+#define KEY_TY in_addr_t
+#define VAL_TY paction_t *
+#define VAL_DTOR_FN free
+#include "verstable.h"
+
 #pragma GCC diagnostic pop
 
-struct prefix {
-	char action;
-	in_addr_t ip;
+/* Bucket of prefix action maps per prefix length */
+struct pbucket {
 	unsigned int plen;
-	uint8_t hwaddr[HWADDR_LEN];
-	size_t hwlen;
+	in_addr_t mask;
+	bool set;
+	paction_map prefixes;
 };
+typedef struct pbucket pbucket_t;
+
+struct pstore {
+	pbucket_t buckets[PREFIX_MAX_LEN + 1];
+};
+typedef struct pstore pstore_t;
 
 /* interfaces are stored in a TAILQ list, which is fine
  * because the interface list is only used at startup and finish. */
@@ -102,7 +129,7 @@ struct interface
 	int fd;
 	size_t buffer_size, buffer_len, buffer_pos;
 	unsigned char *buffer;
-	lpm_t *prefixes;
+	pstore_t pstore;
 	ipaddr_map ipaddrs;
 };
 
@@ -110,7 +137,7 @@ struct ctx {
 	struct eloop *eloop;
 	const char *cffile;
 	time_t config_mtime;
-	lpm_t *prefixes;
+	pstore_t pstore;
 	TAILQ_HEAD (interface_head, interface) ifaces;
 };
 

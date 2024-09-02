@@ -46,6 +46,7 @@
 
 #define	VERSION			"2.3.0"
 #define	PARPD_CONF		SYSCONFDIR "/parpd.conf"
+#define	CONFIG_CACHE_SECS	1
 
 #define	HWADDR_LEN		20
 
@@ -137,6 +138,7 @@ struct ctx {
 	struct eloop *eloop;
 	const char *cffile;
 	time_t config_mtime;
+	struct timespec config_cache;
 	pstore_t pstore;
 	TAILQ_HEAD (interface_head, interface) ifaces;
 };

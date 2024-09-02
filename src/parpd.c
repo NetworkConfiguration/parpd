@@ -293,11 +293,25 @@ load_config(struct ctx *ctx)
 	struct interface *ifp;
 	paction_t *pa;
 	pstore_t *pstore;
+	struct timespec now;
+
+	/* clock_gettime is more efficient than stat on bare-metal. */
+	clock_gettime(CLOCK_MONOTONIC, &now);
+	if (timespecisset(&ctx->config_cache)) {
+		unsigned long long secs;
+
+		secs = eloop_timespec_diff(&now, &ctx->config_cache, NULL);
+		if (secs < CONFIG_CACHE_SECS) {
+			return 0;
+		}
+	}
+	ctx->config_cache = now;
 
 	if (stat(ctx->cffile, &st) == -1) {
 		free_config(ctx);
 		return -1;
 	}
+
 	if (ctx->config_mtime == st.st_mtime)
 		return 0;
 

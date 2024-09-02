@@ -850,6 +850,7 @@ main(int argc, char **argv)
                 }
 	}
 
+	syslog(LOG_NOTICE, "parpd-%s started", VERSION);
 	opt = eloop_start(eloop, &sigset);
 
 out:

@@ -285,11 +285,10 @@ load_config(struct ctx *ctx)
 	int error = -1;
 	struct stat st;
 	FILE *f;
-	char *buf, *cmd, *match, *hwaddr, *bp, *p, *e, *r, act;
+	char *buf, *cmd, *match, *hwaddr, *bp, *p, *e, *r, act, *rangep;
 	size_t buf_len;
 	ssize_t len;
-	long plen;
-	int in_interface;
+	long plen, range, range_end;
 	struct in_addr ina;
 	struct interface *ifp;
 	paction_t *pa;
@@ -309,7 +308,6 @@ load_config(struct ctx *ctx)
 
 	ctx->config_mtime = st.st_mtime;
 	ifp = NULL;
-	in_interface = 0;
 	buf = NULL;
 	buf_len = 0;
 
@@ -342,13 +340,13 @@ load_config(struct ctx *ctx)
 			syslog(LOG_ERR, "%s: unknown command", cmd);
 			continue;
 		}
-		if (in_interface && ifp == NULL)
-			continue;
+
 		hwaddr = get_word(&bp, e);
 		if (!match) {
 			syslog(LOG_DEBUG, "no ip/cidr given");
 			continue;
 		}
+
 		plen = 32;
 		p = strchr(match, '/');
 		if (p) {
@@ -376,10 +374,53 @@ load_config(struct ctx *ctx)
 				}
 			}
 		}
-		if (inet_pton(AF_INET, match, &ina) <= 0) {
-			syslog(LOG_DEBUG, "%s: invalid inet addr", match);
-			continue;
+
+		p = strchr(match, '-');
+		if (p) {
+			char *dash, *end, *endp;
+
+			rangep = end = p;
+			*end++ = '\0';
+			rangep--;
+			while (rangep > match && *rangep != '.')
+				rangep--;
+			if (*rangep == '.')
+				rangep++;
+			errno = 0;
+			range = strtol(rangep, &dash, 10);
+			if (errno == 0 && dash == p) {
+				if (range < 0 || range > 255) {
+					syslog(LOG_DEBUG,
+					    "%s: invalid range", rangep);
+					continue;
+				}
+			} else {
+				if (errno == 0)
+					errno = EINVAL;
+				syslog(LOG_ERR, "%s: %m", rangep);
+				continue;
+			}
+
+			range_end = strtol(end, &endp, 10);
+			if (errno == 0) {
+				if (range_end < 0 || range_end > 255) {
+					syslog(LOG_DEBUG,
+					    "%s: invalid range", end);
+					continue;
+				}
+			} else {
+				syslog(LOG_ERR, "%s: %m", end);
+				continue;
+			}
+			if (range_end <= range) {
+				syslog(LOG_DEBUG, "invalid end range (%ld<%ld)",
+				    range_end, range);
+				continue;
+			}
+		} else {
+			range = range_end = -1;
 		}
+
 		if (hwaddr != NULL) {
 			if (*hwaddr == '#' || *hwaddr == ';') {
 				hwaddr = NULL;
@@ -398,30 +439,45 @@ load_config(struct ctx *ctx)
 				}
 			}
 		}
+
 		pstore = ifp != NULL ? &ifp->pstore : &ctx->pstore;
 
-		/* Check if we have already added the prefix,
-		 * overwrite it if we have. */
-		pa = pm_get(pstore, ina.s_addr, (unsigned int)plen);
-		if (pa == NULL) {
-			pa = malloc(sizeof(*pa));
-			if (pa == NULL)
-				goto err;
-			pa->ip = ina.s_addr;
-			pa->plen = (unsigned int)plen;
-			if (pm_insert(pstore, pa->ip, pa->plen, pa) == -1)
-			{
-				syslog(LOG_ERR, "pm_insert: %m");
-				free(pa);
-				goto err;
+		for (; range <= range_end; range++) {
+			if (range != -1) {
+				// We know this is safe because the range string
+				// must be bigger than the target we write.
+				sprintf(rangep, "%ld", range);
 			}
-		}
 
-		pa->action = act;
-		if (hwaddr == NULL)
-			pa->hwlen = 0;
-		else
-			pa->hwlen = hwaddr_aton(pa->hwaddr, hwaddr);
+			if (inet_pton(AF_INET, match, &ina) <= 0) {
+				syslog(LOG_DEBUG, "%s: invalid inet addr",
+				    match);
+				break;
+			}
+
+			/* Check if we have already added the prefix,
+			 * overwrite it if we have. */
+			pa = pm_get(pstore, ina.s_addr, (unsigned int)plen);
+			if (pa == NULL) {
+				pa = malloc(sizeof(*pa));
+				if (pa == NULL)
+					goto err;
+				pa->ip = ina.s_addr;
+				pa->plen = (unsigned int)plen;
+				if (pm_insert(pstore, pa->ip, pa->plen, pa) == -1)
+				{
+					syslog(LOG_ERR, "pm_insert: %m");
+					free(pa);
+					goto err;
+				}
+			}
+
+			pa->action = act;
+			if (hwaddr == NULL)
+				pa->hwlen = 0;
+			else
+				pa->hwlen = hwaddr_aton(pa->hwaddr, hwaddr);
+		}
 	}
 
 	error = 0;

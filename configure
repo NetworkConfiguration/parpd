@@ -569,8 +569,9 @@ if [ -z "$POLL" ]; then
 #include <sys/epoll.h>
 #include <unistd.h>
 int main(void) {
+	struct epoll_event e;
 	epoll_create1(EPOLL_CLOEXEC);
-	epoll_pwait(-1, NULL, 0, 0, NULL);
+	epoll_pwait(-1, &e, 0, 0, NULL);
 	return 0;
 }
 EOF

@@ -205,7 +205,7 @@ pm_anyset(pstore_t *store)
 {
 	unsigned int plen;
 
-	for (plen = 0; plen < PREFIX_MAX_LEN; plen++) {
+	for (plen = 0; plen <= PREFIX_MAX_LEN; plen++) {
 		if (store->buckets[plen].set)
 			return true;
 	}

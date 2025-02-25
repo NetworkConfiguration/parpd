@@ -15,7 +15,7 @@ SED?=		sed
 HOST_SH?=	/bin/sh
 
 SHA256?=	sha256
-PGP?=		gpg
+PGP?=		gpg2
 
 SED_RUNDIR=		-e 's:@RUNDIR@:${RUNDIR}:g'
 SED_SYS=		-e 's:@SYSCONFDIR@:${SYSCONFDIR}:g'
